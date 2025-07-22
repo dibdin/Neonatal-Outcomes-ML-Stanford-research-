@@ -1,3 +1,16 @@
+"""
+Data loading and preprocessing utilities for gestational age prediction.
+
+This module provides functions for:
+- Loading and processing different data types (clinical, biomarker, combined)
+- Feature engineering and interaction creation
+- Data splitting and preprocessing
+- Missing value handling and standardization
+
+Author: Diba Dindoust
+Date: 07/01/2025
+"""
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -5,12 +18,224 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from itertools import combinations
 
-def load_and_process_data(dataset_type='cord', model_type='biomarker', dropna=False, random_state=48, include_all_biomarkers=True):
+
+def load_and_process_data(dataset_type='cord', model_type='biomarker', data_option=1, dropna=False, random_state=48, include_all_biomarkers=True, target_type='gestational_age', return_dataframe=False):
     """
-    Load and process data for different model types:
-    - 'clinical': Only clinical/demographic features (columns 145, 146, 159 and their pairwise interactions)
-    - 'biomarker': Only biomarker features (current model)
-    - 'combined': Both clinical and biomarker features
+    Load and process data for different model types with three data loading options.
+    
+    Args:
+        dataset_type (str): Dataset type ('cord' or 'heel') - only used for naming consistency
+        model_type (str): Model type ('clinical', 'biomarker', or 'combined')
+        data_option (int): Data loading option:
+            1: Load data from Bangladeshcombineddataset_both_samples.csv for patients with both cord and heel data
+            2: Load data from BangladeshcombineddatasetJan252022.csv for all heel data entries
+            3: Load data from BangladeshcombineddatasetJan252022.csv for all cord data entries
+        dropna (bool): Whether to drop rows with missing data
+        random_state (int): Random state for reproducibility
+        include_all_biomarkers (bool): Whether to include all biomarkers (currently unused)
+        target_type (str): Target variable type ('gestational_age' or 'birth_weight')
+            - 'gestational_age': Predict gestational age (original pipeline)
+            - 'birth_weight': Predict birth weight (SGA classification pipeline)
+        
+    Returns:
+        tuple: (X, y) where X is the feature matrix and y is the target variable
+        
+    Raises:
+        ValueError: If dataset_type, model_type, data_option, or target_type is invalid
+    """
+    if dataset_type not in ['cord', 'heel']:
+        raise ValueError("dataset_type must be either 'cord' or 'heel'.")
+    
+    if model_type not in ['clinical', 'biomarker', 'combined']:
+        raise ValueError("model_type must be either 'clinical', 'biomarker', or 'combined'.")
+    
+    if data_option not in [1, 2, 3]:
+        raise ValueError("data_option must be 1, 2, or 3.")
+    
+    if target_type not in ['gestational_age', 'birth_weight']:
+        raise ValueError("target_type must be either 'gestational_age' or 'birth_weight'.")
+
+    # Load data based on option
+    if data_option == 1:
+        # Option 1: Load data for patients with both cord and heel data
+        df = pd.read_csv('data/Bangladeshcombineddataset_both_samples.csv')
+        if 'date_transfusion' in df.columns:
+            df = df.drop(columns=['date_transfusion'])
+        
+        # Split by type
+        cord_df = df[df['Source'] == 'CORD'].copy()
+        heel_df = df[df['Source'] == 'HEEL'].copy()
+        
+        # Use the specified dataset type
+        if dataset_type == 'cord':
+            data_df = cord_df
+        else:  # 'heel'
+            data_df = heel_df
+            
+    elif data_option == 2:
+        # Option 2: Load all heel data from the full dataset
+        df = pd.read_csv('data/BangladeshcombineddatasetJan252022.csv')
+        if 'date_transfusion' in df.columns:
+            df = df.drop(columns=['date_transfusion'])
+        
+        # Filter for heel data only
+        data_df = df[df['Source'] == 'HEEL'].copy()
+        
+    elif data_option == 3:
+        # Option 3: Load all cord data from the full dataset
+        df = pd.read_csv('data/BangladeshcombineddatasetJan252022.csv')
+        if 'date_transfusion' in df.columns:
+            df = df.drop(columns=['date_transfusion'])
+        
+        # Filter for cord data only
+        data_df = df[df['Source'] == 'CORD'].copy()
+
+    # Drop rows with missing data if specified
+    if dropna:
+        data_df = data_df.dropna(axis=0, how='any')
+
+    # Define feature columns based on model type
+    if model_type == 'clinical':
+        # Clinical/demographic features - adjust based on target_type
+        if target_type == 'gestational_age':
+            # Original: birth_weight, sex, birth_order (columns 145, 146, 159)
+            clinical_cols = [df.columns[144], df.columns[145], df.columns[158]]  # 0-indexed, so 145->144, 146->145, 159->158
+        else:  # target_type == 'birth_weight'
+            # SGA pipeline: gestational_age_weeks, sex, birth_order (replace birth_weight with gestational_age_weeks)
+            clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[158]]  # gestational_age_weeks, sex, birth_order
+        
+        print(f"Base clinical columns: {clinical_cols}")
+        
+        # Extract base clinical features
+        X_clinical = data_df[clinical_cols].copy()
+        
+        # Create pairwise interactions
+        interaction_features = []
+        for col1, col2 in combinations(clinical_cols, 2):
+            interaction_name = f"{col1}_x_{col2}"
+            X_clinical[interaction_name] = X_clinical[col1] * X_clinical[col2]
+            interaction_features.append(interaction_name)
+            
+        print(f"Created {len(interaction_features)} pairwise interactions: {interaction_features}")
+        feature_cols = clinical_cols + interaction_features
+        
+    elif model_type == 'biomarker':
+        # Biomarker features (columns 30-141)
+        feature_cols = df.columns[30:141].tolist()
+        
+    elif model_type == 'combined':
+        # Both clinical and biomarker features
+        biomarker_cols = df.columns[30:141].tolist()
+        
+        # Clinical features with interactions - adjust based on target_type
+        if target_type == 'gestational_age':
+            # Original: birth_weight, sex, birth_order
+            clinical_cols = [df.columns[144], df.columns[145], df.columns[158]]
+        else:  # target_type == 'birth_weight'
+            # SGA pipeline: gestational_age_weeks, sex, birth_order
+            clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[158]]
+        
+        # Extract base clinical features
+        X_clinical = data_df[clinical_cols].copy()
+        
+        # Create pairwise interactions
+        interaction_features = []
+        for col1, col2 in combinations(clinical_cols, 2):
+            interaction_name = f"{col1}_x_{col2}"
+            X_clinical[interaction_name] = X_clinical[col1] * X_clinical[col2]
+            interaction_features.append(interaction_name)
+            
+        clinical_with_interactions = clinical_cols + interaction_features
+        feature_cols = biomarker_cols + clinical_with_interactions
+
+    # Extract features and labels
+    if model_type == 'clinical':
+        X = X_clinical
+        y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
+    elif model_type == 'biomarker':
+        X = data_df[feature_cols]
+        y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
+    elif model_type == 'combined':
+        # For combined, we need to merge biomarker and clinical data
+        X_biomarker = data_df[biomarker_cols]
+        y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
+        
+        # Merge biomarker and clinical data
+        X = pd.concat([X_biomarker, X_clinical], axis=1)
+
+    # Print information about the features being included
+    print(f"Data option: {data_option}")
+    print(f"Dataset: {dataset_type}")
+    print(f"Model type: {model_type}")
+    print(f"Target variable: {target_type}")
+    print(f"Number of features included: {len(feature_cols)}")
+    print(f"Number of samples: {len(data_df)}")
+    
+    if model_type == 'clinical':
+        print(f"Clinical features: {feature_cols}")
+    elif model_type == 'biomarker':
+        print(f"Biomarkers with TREC: {[col for col in feature_cols if 'TREC' in col]}")
+        print(f"Biomarkers with HGB: {[col for col in feature_cols if 'HGB' in col]}")
+    elif model_type == 'combined':
+        biomarker_count = len(biomarker_cols)
+        clinical_count = len(clinical_with_interactions)
+        print(f"Biomarker features: {biomarker_count}")
+        print(f"Clinical features (with interactions): {clinical_count}")
+
+    # Handle missing values
+    X = X.dropna(axis=1, how='all')  # Drop columns with all missing values first
+    
+    # For clinical features, handle categorical variables
+    if model_type in ['clinical', 'combined']:
+        # Convert categorical variables to numeric
+        categorical_cols = X.select_dtypes(include=['object']).columns
+        for col in categorical_cols:
+            if col in X.columns:
+                X[col] = pd.Categorical(X[col]).codes
+    
+    # Impute missing values with column-wise mean
+    imputer = SimpleImputer(strategy="mean")
+    X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
+
+    # Handle missing values in target variable
+    if y.isna().any():
+        print(f"Warning: Found {y.isna().sum()} missing values in target variable. Dropping these samples.")
+        # Get indices where target is not NaN
+        valid_indices = ~y.isna()
+        X = X[valid_indices]
+        y = y[valid_indices]
+        if return_dataframe:
+            data_df = data_df[valid_indices]
+
+    # REMOVE SCALING FROM HERE
+    # scaler = StandardScaler()
+    # X_scaled = scaler.fit_transform(X)
+    # X = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+
+    if return_dataframe:
+        return X, y, data_df
+    else:
+        return X, y
+
+
+def load_and_process_sga_data(dataset_type='cord', model_type='biomarker', dropna=False, random_state=48):
+    """
+    Load and process data for SGA (Small for Gestational Age) regression analysis.
+    
+    This function creates SGA risk scores based on gestational age percentiles,
+    since birth weight data is not available in the current dataset.
+    
+    Args:
+        dataset_type (str): Dataset type ('cord' or 'heel')
+        model_type (str): Model type ('clinical', 'biomarker', or 'combined')
+        dropna (bool): Whether to drop rows with missing data
+        random_state (int): Random state for reproducibility
+        
+    Returns:
+        tuple: (X, y_sga) where X is the feature matrix and y_sga is the SGA risk score
+        
+    Raises:
+        ValueError: If dataset_type or model_type is invalid
     """
     if dataset_type not in ['cord', 'heel']:
         raise ValueError("dataset_type must be either 'cord' or 'heel'.")
@@ -19,7 +244,7 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', dropna=Fa
         raise ValueError("model_type must be either 'clinical', 'biomarker', or 'combined'.")
 
     # Load data
-    df = pd.read_csv('data/BangladeshcombineddatasetJan252022.csv')
+    df = pd.read_csv('data/Bangladeshcombineddataset_both_samples.csv')
 
     # Drop rows with missing data if specified
     if dropna:
@@ -29,7 +254,7 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', dropna=Fa
     cord_df = df[df['Source'] == 'CORD'].copy()
     heel_df = df[df['Source'] == 'HEEL'].copy()
 
-    # Define feature columns based on model type
+    # Define feature columns based on model type (same as original function)
     if model_type == 'clinical':
         # Clinical/demographic features (columns 145, 146, 159 and their pairwise interactions)
         clinical_cols = [df.columns[144], df.columns[145], df.columns[158]]  # 0-indexed, so 145->144, 146->145, 159->158
@@ -84,36 +309,61 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', dropna=Fa
         clinical_with_interactions = clinical_cols + interaction_features
         feature_cols = biomarker_cols + clinical_with_interactions
 
-    # Extract features and labels
+    # Extract features and gestational age
     if model_type == 'clinical':
         X = X_clinical
         if dataset_type == 'cord':
-            y = cord_df['gestational_age_weeks']
+            ga_weeks = cord_df['gestational_age_weeks']
         else:  # 'heel'
-            y = heel_df['gestational_age_weeks']
+            ga_weeks = heel_df['gestational_age_weeks']
     elif model_type == 'biomarker':
         if dataset_type == 'cord':
             X = cord_df[feature_cols]
-            y = cord_df['gestational_age_weeks']
+            ga_weeks = cord_df['gestational_age_weeks']
         else:  # 'heel'
             X = heel_df[feature_cols]
-            y = heel_df['gestational_age_weeks']
+            ga_weeks = heel_df['gestational_age_weeks']
     elif model_type == 'combined':
         # For combined, we need to merge biomarker and clinical data
         if dataset_type == 'cord':
             X_biomarker = cord_df[biomarker_cols]
-            y = cord_df['gestational_age_weeks']
+            ga_weeks = cord_df['gestational_age_weeks']
         else:  # 'heel'
             X_biomarker = heel_df[biomarker_cols]
-            y = heel_df['gestational_age_weeks']
+            ga_weeks = heel_df['gestational_age_weeks']
         
         # Merge biomarker and clinical data
         X = pd.concat([X_biomarker, X_clinical], axis=1)
+
+    # Create SGA risk score based on gestational age percentiles
+    # Using INTERGROWTH-21st inspired approach
+    # SGA is typically <10th percentile, but we'll create a continuous risk score
+    
+    # Calculate gestational age percentiles
+    ga_percentiles = ga_weeks.rank(pct=True) * 100
+    
+    # Create SGA risk score (higher score = higher risk of SGA)
+    # Lower gestational age = higher SGA risk
+    sga_risk = 100 - ga_percentiles  # Invert so lower GA = higher risk
+    
+    # Normalize to 0-1 scale
+    sga_risk = (sga_risk - sga_risk.min()) / (sga_risk.max() - sga_risk.min())
+    
+    # Alternative: Create SGA risk based on distance from expected GA
+    # Expected GA is around 40 weeks for term pregnancies
+    expected_ga = 40
+    ga_deviation = abs(ga_weeks - expected_ga)
+    sga_risk_deviation = ga_deviation / ga_deviation.max()
+    
+    # Combine both approaches
+    y_sga = (sga_risk + sga_risk_deviation) / 2
 
     # Print information about the features being included
     print(f"Dataset: {dataset_type}")
     print(f"Model type: {model_type}")
     print(f"Number of features included: {len(feature_cols)}")
+    print(f"SGA risk score range: {y_sga.min():.3f} - {y_sga.max():.3f}")
+    print(f"Mean SGA risk: {y_sga.mean():.3f}")
     
     if model_type == 'clinical':
         print(f"Clinical features: {feature_cols}")
@@ -141,12 +391,20 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', dropna=Fa
     imputer = SimpleImputer(strategy="mean")
     X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
 
-    # Standardize the features (important for regularized models like ElasticNet and STABL)
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    X = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+    return X, y_sga
 
-    return X, y
 
-def split_data(X, y, test_size, random_state=None):  
-        return train_test_split(X, y, test_size=test_size, random_state=random_state)
+def split_data(X, y, test_size, random_state=None):
+    """
+    Split data into training and test sets.
+    
+    Args:
+        X (pd.DataFrame): Feature matrix
+        y (pd.Series): Target variable
+        test_size (float): Proportion of data to use for testing
+        random_state (int, optional): Random state for reproducibility
+        
+    Returns:
+        tuple: (X_train, X_test, y_train, y_test)
+    """
+    return train_test_split(X, y, test_size=test_size, random_state=random_state)

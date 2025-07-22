@@ -20,24 +20,31 @@ Date: 07/01/2025
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.metrics import roc_auc_score, roc_curve, accuracy_score, confusion_matrix, mean_absolute_error, mean_squared_error
 import pickle
+from sklearn.preprocessing import StandardScaler
+import os # Added for os.makedirs
 
 from src.data_loader import split_data, load_and_process_data
 from src.model import train_model, predict_model, get_model
 from src.metrics import (
-    average_auc, compute_mae, compute_rmse, 
+    compute_mae, compute_rmse, 
     compute_metrics_by_gestational_age, compute_confidence_interval
 )
 from src.utils import (
-    plot_feature_frequency, plot_roc_curve, save_all_as_pickle,
     count_high_weight_biomarkers, create_metrics_table,
-    plot_metrics_with_confidence_intervals
+    plot_metrics_with_confidence_intervals, plot_summary_auc_by_dataset_and_model,
+    plot_summary_mae_by_dataset_and_model, plot_summary_rmse_by_dataset_and_model,
+    plot_true_vs_predicted_scatter, plot_biomarker_frequency_heel_vs_cord,
+    save_all_as_pickle
 )
 from src.config import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF
 
+DATA_OPTION_LABELS = {1: 'both_samples', 2: 'heel_all', 3: 'cord_all'}
 
-def run_single_model(model_name, data_type, dataset_type, model_type):
+stabl_heel_biomarker_zero_feature_runs = []
+
+def run_single_model(model_name, data_type, dataset_type, model_type, data_option=1, data_option_label='both_samples', target_type='gestational_age'):
     """
     Run a single model configuration and return results.
     
@@ -46,167 +53,401 @@ def run_single_model(model_name, data_type, dataset_type, model_type):
         data_type (str): Type of data to use (clinical, biomarker, combined)
         dataset_type (str): Dataset type (cord, heel)
         model_type (str): Model algorithm (lasso, elasticnet, stabl)
+        data_option (int): Data loading option (1, 2, or 3)
+        data_option_label (str): Label for data option
+        target_type (str): Target variable type ('gestational_age' or 'birth_weight')
     
     Returns:
         dict: Model results and summary statistics
     """
     print(f"\n{'='*60}")
-    print(f"MODEL: {model_name} ({data_type.upper()} DATA) - {model_type.upper()} ON {dataset_type.upper()}")
+    print(f"MODEL: {model_name} ({data_type.upper()} DATA) - {model_type.upper()} ON {dataset_type.upper()} [{data_option_label}]")
     print(f"{'='*60}")
     
     # Load and prepare data for this model
-    X, y = load_and_process_data(dataset_type, model_type=data_type)
+    X, y = load_and_process_data(dataset_type, model_type=data_type, data_option=data_option, target_type=target_type)
     print(f"X shape: {X.shape}, y shape: {y.shape}")
     
     # Initialize results storage
-    aucs = []
-    all_coefficients = []
-    all_fpr = np.linspace(0, 1, 100)  # fixed FPR values for ROC averaging
-    tpr_list = []
     maes = []
     rmses = []
-    preterm_metrics_list = []
-    term_metrics_list = []
+    aucs = []
+    run_predictions = []
+    run_classification_predictions = []
+    all_coefficients = []  # Collect coefficients for all runs
+    all_classification_coefficients = []  # Collect coefficients for classification
 
-    # Train and evaluate over multiple repeats
+    # --- REGRESSION TASK (GA prediction) ---
+    n_stabl_regression_skipped = 0
     for i in range(N_REPEATS):
-        # Split data
-        X_train, X_test, y_train, y_test = split_data(X, y, test_size=TEST_SIZE, random_state=i)
-        
-        # Get and train model
-        model, base_estimator = get_model(model_type)
-        
-        if model_type == 'stabl':
-            trained_model, base_estimator = train_model(X_train, y_train, model, base_estimator)
-            y_preds = predict_model(model, X_test, base_estimator)
-        else:
-            trained_model, _ = train_model(X_train, y_train, model, None)
-            y_preds = predict_model(model, X_test)
-
-        # Convert to binary preterm outcome for AUC calculation
-        y_test_binary = (y_test < PRETERM_CUTOFF).astype(int)
-        y_pred_binary = (y_preds < PRETERM_CUTOFF).astype(int)
-        y_pred_score = -y_preds  # lower GA = higher preterm risk
-
-        # Calculate metrics
-        auc = roc_auc_score(y_test_binary, y_pred_score)
-        aucs.append(auc)
-
-        # Interpolate TPR at fixed FPR for ROC averaging
-        fpr, tpr, _ = roc_curve(y_test_binary, y_pred_score)
-        interp_tpr = np.interp(all_fpr, fpr, tpr)
-        interp_tpr[0] = 0.0  # ensure start at 0
-        tpr_list.append(interp_tpr)
-       
-        # Compute MAE and RMSE for gestational age prediction
-        mae = compute_mae(y_test, y_preds)
-        rmse = compute_rmse(y_test, y_preds)
-        maes.append(mae)
-        rmses.append(rmse)
-
-        # Compute separate metrics for preterm and term babies
-        metrics_by_ga = compute_metrics_by_gestational_age(y_test, y_preds, PRETERM_CUTOFF)
-        preterm_metrics_list.append(metrics_by_ga['preterm'])
-        term_metrics_list.append(metrics_by_ga['term'])
-
-        # Print first 5 runs for monitoring
-        if i < 5:
-            print(f"Run {i + 1}: AUC = {auc:.3f}, MAE = {mae:.2f}, RMSE = {rmse:.2f}")
-            print(f"  Preterm (n={metrics_by_ga['preterm']['count']}): MAE = {metrics_by_ga['preterm']['mae']:.2f}, RMSE = {metrics_by_ga['preterm']['rmse']:.2f}")
-            print(f"  Term (n={metrics_by_ga['term']['count']}): MAE = {metrics_by_ga['term']['mae']:.2f}, RMSE = {metrics_by_ga['term']['rmse']:.2f}")
-
-        # Save outputs per run
-        output_data = {
-            "coef": base_estimator.coef_ if base_estimator is not None else trained_model.coef_,
-            "GA preds": y_preds,
-            "GA true": y_test,
-            "features": X_test,
-            "preterm preds": y_pred_binary,
-            "preterm true": y_test_binary,
-            "AUC": auc,
-            "RMSE": rmse,
-            "MAE": mae,
-            "preterm_metrics": metrics_by_ga['preterm'],
-            "term_metrics": metrics_by_ga['term']
-        }
-        filename = f"outputs/models/{dataset_type}_{model_type}_{model_name.lower()}_run{i + 1}_model_outputs.pkl"
-        save_all_as_pickle(output_data, filename=filename)
-
-        # Collect coefficients for feature importance analysis
-        all_coefficients.append(base_estimator.coef_ if base_estimator is not None else trained_model.coef_)
-
-    # Compute confidence intervals and summary statistics
-    mae_mean, mae_ci_lower, mae_ci_upper = compute_confidence_interval(maes)
-    rmse_mean, rmse_ci_lower, rmse_ci_upper = compute_confidence_interval(rmses)
-    auc_mean = average_auc(aucs)
-
+        try:
+            # Split data
+            X_train, X_test, y_train, y_test = split_data(X, y, test_size=TEST_SIZE, random_state=42 + i)
+            
+            if model_type == 'stabl':
+                from sklearn.pipeline import Pipeline
+                from sklearn.feature_selection import VarianceThreshold
+                from stabl.preprocessing import LowInfoFilter
+                from sklearn.impute import SimpleImputer
+                # Build preprocessing pipeline as in the official STABL notebook
+                preprocessing = Pipeline([
+                    ("variance_threshold", VarianceThreshold(threshold=0)),
+                    ("low_info_filter", LowInfoFilter(max_nan_fraction=0.2)),
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("std", StandardScaler()),
+                ])
+                X_train_processed = preprocessing.fit_transform(X_train)
+                X_test_processed = preprocessing.transform(X_test)
+                # Convert back to DataFrame for compatibility
+                X_train_scaled = pd.DataFrame(X_train_processed, columns=X_train.columns[preprocessing.named_steps['variance_threshold'].get_support()][preprocessing.named_steps['low_info_filter'].get_support()], index=X_train.index)
+                X_test_scaled = pd.DataFrame(X_test_processed, columns=X_train_scaled.columns, index=X_test.index)
+            else:
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                X_test_scaled = scaler.transform(X_test)
+                X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
+                X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
+            
+            # Get and train model
+            model, base_estimator = get_model(model_type)
+            if model_type == 'stabl':
+                from sklearn.pipeline import Pipeline
+                from sklearn.feature_selection import VarianceThreshold
+                from stabl.preprocessing import LowInfoFilter
+                from sklearn.impute import SimpleImputer
+                # Build preprocessing pipeline as in the official STABL notebook
+                preprocessing = Pipeline([
+                    ("variance_threshold", VarianceThreshold(threshold=0)),
+                    ("low_info_filter", LowInfoFilter(max_nan_fraction=0.2)),
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("std", StandardScaler()),
+                ])
+                X_train_processed = preprocessing.fit_transform(X_train)
+                X_test_processed = preprocessing.transform(X_test)
+                # Convert back to DataFrame for compatibility
+                X_train_scaled = pd.DataFrame(X_train_processed, columns=X_train.columns[preprocessing.named_steps['variance_threshold'].get_support()][preprocessing.named_steps['low_info_filter'].get_support()], index=X_train.index)
+                X_test_scaled = pd.DataFrame(X_test_processed, columns=X_train_scaled.columns, index=X_test.index)
+                print('\n[DEBUG] STABL input X_train_scaled shape:', X_train_scaled.shape)
+                print('[DEBUG] First 5 rows of X_train_scaled:\n', X_train_scaled.head())
+                variances = X_train_scaled.var(axis=0)
+                print('[DEBUG] Feature variances:')
+                print('  Number of features with zero variance:', (variances == 0).sum())
+                print('  Min variance:', variances.min())
+                print('  Max variance:', variances.max())
+                print('  Mean variance:', variances.mean())
+                print('[DEBUG] y_train stats: min', y_train.min(), 'max', y_train.max(), 'mean', y_train.mean(), 'std', y_train.std())
+                trained_model, base_estimator, selected_feature_names = train_model(X_train_scaled, y_train, model, base_estimator)
+                n_selected = len(selected_feature_names) if selected_feature_names is not None else 0
+                print(f"[STABL] Number of features selected for {model_name} ({data_type}) on {dataset_type}: {n_selected}")
+                print(f"[STABL] Selected features: {list(selected_feature_names) if selected_feature_names is not None else 'None'}")
+                if base_estimator is not None and hasattr(base_estimator, 'coef_'):
+                    print(f"[STABL] Base estimator coefficients: {base_estimator.coef_}")
+                y_preds = predict_model(model, X_test_scaled, base_estimator)
+            else:
+                trained_model, _, selected_feature_names = train_model(X_train_scaled, y_train, model, None)
+                y_preds = predict_model(trained_model, X_test_scaled, None)
+            
+            # Calculate regression metrics
+            mae = mean_absolute_error(y_test, y_preds)
+            rmse = np.sqrt(mean_squared_error(y_test, y_preds))
+            
+            # Store regression results
+            maes.append(mae)
+            rmses.append(rmse)
+            
+            # Store regression predictions for this run
+            run_predictions.append({
+                'true': y_test.values,
+                'pred': y_preds,
+                'mae': mae,
+                'rmse': rmse
+            })
+            
+            # Save regression model outputs per run
+            if target_type == 'gestational_age':
+                model_outputs = {
+                    'GA true': y_test.values,
+                    'GA preds': y_preds,
+                    'MAE': mae,
+                    'RMSE': rmse,
+                    'features': X_train_scaled,
+                    'coef': trained_model.coef_ if hasattr(trained_model, 'coef_') else None
+                }
+            else:  # target_type == 'birth_weight'
+                model_outputs = {
+                    'BW true': y_test.values,
+                    'BW preds': y_preds,
+                    'MAE': mae,
+                    'RMSE': rmse,
+                    'features': X_train_scaled,
+                    'coef': trained_model.coef_ if hasattr(trained_model, 'coef_') else None
+                }
+            
+            # Collect coefficients for frequency plot (biomarker/combined only)
+            if model_name.lower() in ['biomarker', 'combined']:
+                if hasattr(trained_model, 'coef_') and trained_model.coef_ is not None:
+                    # Ensure full length, pad with zeros if needed
+                    coef = trained_model.coef_
+                    if len(coef) < X_train_scaled.shape[1]:
+                        coef = np.pad(coef, (0, X_train_scaled.shape[1] - len(coef)), 'constant')
+                    all_coefficients.append(coef)
+                else:
+                    all_coefficients.append(np.zeros(X_train_scaled.shape[1]))
+            
+            # Save regression model outputs per run
+            filename = f"outputs/models/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_run{i + 1}_model_outputs.pkl"
+            save_all_as_pickle(model_outputs, filename)
+            
+            # --- CLASSIFICATION TASK (Preterm vs Term or SGA vs Normal) ---
+            # Only run classification for lasso and elasticnet
+            if model_type in ['lasso', 'elasticnet']:
+                # Create binary classification targets based on target_type
+                if target_type == 'gestational_age':
+                    # Original: Preterm vs Term classification
+                    y_train_binary = (y_train < PRETERM_CUTOFF).astype(int)
+                    y_test_binary = (y_test < PRETERM_CUTOFF).astype(int)
+                    classification_type = 'preterm'
+                else:  # target_type == 'birth_weight'
+                    # SGA classification using Intergrowth-21 reference values
+                    from src.sga_classification import create_sga_targets_intergrowth21
+                    # Create SGA targets for both 10th and 3rd percentile using Intergrowth-21
+                    sga_10th_train = create_sga_targets_intergrowth21(y_train, data_option, dataset_type, '10th_percentile')
+                    sga_10th_test = create_sga_targets_intergrowth21(y_test, data_option, dataset_type, '10th_percentile')
+                    sga_3rd_train = create_sga_targets_intergrowth21(y_train, data_option, dataset_type, '3rd_percentile')
+                    sga_3rd_test = create_sga_targets_intergrowth21(y_test, data_option, dataset_type, '3rd_percentile')
+                    # Use 3rd percentile for main classification (Intergrowth-21 standard)
+                    y_train_binary = sga_3rd_train
+                    y_test_binary = sga_3rd_test
+                    classification_type = 'sga_3rd_intergrowth21'
+                    # Store both classifications for later analysis
+                    sga_classifications = {
+                        'sga_10th_train': sga_10th_train,
+                        'sga_10th_test': sga_10th_test,
+                        'sga_3rd_train': sga_3rd_train,
+                        'sga_3rd_test': sga_3rd_test
+                    }
+                # Print class balance for train and test splits
+                def print_class_balance(y, label=""):
+                    unique, counts = np.unique(y[~np.isnan(y)], return_counts=True)
+                    print(f"    {label} class balance: {dict(zip(unique, counts))} (SGA/preterm proportion: {np.nanmean(y):.3f})")
+                print_class_balance(y_train_binary, "Train")
+                print_class_balance(y_test_binary, "Test")
+                
+                # Get classification model
+                from src.model import get_classification_model
+                class_model, class_base_estimator = get_classification_model(model_type)
+                
+                # Train classification model
+                if model_type == 'stabl':
+                    # Apply the same preprocessing pipeline for STABL classification
+                    from sklearn.pipeline import Pipeline
+                    from sklearn.feature_selection import VarianceThreshold
+                    from stabl.preprocessing import LowInfoFilter
+                    from sklearn.impute import SimpleImputer
+                    
+                    # Build preprocessing pipeline as specified
+                    preprocessing = Pipeline([
+                        ("variance_threshold", VarianceThreshold(threshold=0)),  # Removing 0 variance features
+                        ("low_info_filter", LowInfoFilter(max_nan_fraction=0.2)),
+                        ("imputer", SimpleImputer(strategy="median")),  # Imputing missing values with median
+                        ("std", StandardScaler())  # Z-scoring features
+                    ])
+                    
+                    # Apply preprocessing to classification data
+                    X_train_class_processed = preprocessing.fit_transform(X_train)
+                    X_test_class_processed = preprocessing.transform(X_test)
+                    
+                    # Convert back to DataFrame for compatibility
+                    X_train_class_scaled = pd.DataFrame(X_train_class_processed, 
+                        columns=X_train.columns[preprocessing.named_steps['variance_threshold'].get_support()][preprocessing.named_steps['low_info_filter'].get_support()], 
+                        index=X_train.index)
+                    X_test_class_scaled = pd.DataFrame(X_test_class_processed, 
+                        columns=X_train_class_scaled.columns, 
+                        index=X_test.index)
+                    
+                    print(f'\n[DEBUG] STABL classification input X_train_class_scaled shape:', X_train_class_scaled.shape)
+                    
+                    trained_class_model, class_base_estimator, class_selected_feature_names = train_model(X_train_class_scaled, y_train_binary, class_model, class_base_estimator)
+                    y_class_preds = predict_model(class_model, X_test_class_scaled, class_base_estimator)
+                else:
+                    trained_class_model, _, class_selected_feature_names = train_model(X_train_scaled, y_train_binary, class_model, None)
+                    y_class_preds = predict_model(trained_class_model, X_test_scaled, None)
+                
+                # Calculate classification metrics
+                from src.metrics import compute_auc
+                auc = compute_auc(y_test_binary, y_class_preds)
+                
+                # Store classification results
+                aucs.append(auc)
+                
+                # Store classification predictions for this run
+                run_classification_predictions.append({
+                    'true': y_test_binary if isinstance(y_test_binary, np.ndarray) else y_test_binary.values,
+                    'pred': y_class_preds,
+                    'auc': auc
+                })
+                
+                # Collect classification coefficients for frequency plot (biomarker/combined only)
+                if model_name.lower() in ['biomarker', 'combined']:
+                    if hasattr(trained_class_model, 'coef_') and trained_class_model.coef_ is not None:
+                        # For STABL, use the classification-specific feature names and coefficients
+                        if model_type == 'stabl':
+                            class_coef = trained_class_model.coef_
+                            # Pad to match original feature count for consistency
+                            if len(class_coef) < X_train_scaled.shape[1]:
+                                class_coef = np.pad(class_coef, (0, X_train_scaled.shape[1] - len(class_coef)), 'constant')
+                            all_classification_coefficients.append(class_coef)
+                        else:
+                            # For non-STABL models, use the same approach as regression
+                            class_coef = trained_class_model.coef_
+                            if len(class_coef) < X_train_scaled.shape[1]:
+                                class_coef = np.pad(class_coef, (0, X_train_scaled.shape[1] - len(class_coef)), 'constant')
+                            all_classification_coefficients.append(class_coef)
+                    else:
+                        all_classification_coefficients.append(np.zeros(X_train_scaled.shape[1]))
+                
+                # Save classification model outputs per run
+                if target_type == 'gestational_age':
+                    class_model_outputs = {
+                        'Preterm true': y_test_binary if isinstance(y_test_binary, np.ndarray) else y_test_binary.values,
+                        'Preterm preds': y_class_preds,
+                        'AUC': auc,
+                        'features': X_train_scaled,
+                        'coef': trained_class_model.coef_ if hasattr(trained_class_model, 'coef_') else None
+                    }
+                else:  # target_type == 'birth_weight'
+                    class_model_outputs = {
+                        'SGA true': y_test_binary if isinstance(y_test_binary, np.ndarray) else y_test_binary.values,
+                        'SGA preds': y_class_preds,
+                        'AUC': auc,
+                        'features': X_train_scaled,
+                        'coef': trained_class_model.coef_ if hasattr(trained_class_model, 'coef_') else None
+                    }
+                class_filename = f"outputs/models/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_run{i + 1}_classification_outputs.pkl"
+                save_all_as_pickle(class_model_outputs, class_filename)
+                
+                print(f"  Run {i+1}: MAE = {mae:.3f}, RMSE = {rmse:.3f}, AUC = {auc:.3f}")
+            else:
+                print(f"  Run {i+1}: Skipping classification for STABL model.")
+        except RuntimeError as e:
+            if model_type == 'stabl' and 'zero features' in str(e).lower():
+                print(f"[STABL] Skipping run {i+1} for {model_name} ({data_type}) on {dataset_type}: zero features selected.")
+                n_stabl_regression_skipped += 1
+                continue
+            else:
+                raise
+    
+    # Print summary of skipped STABL runs
+    if model_type == 'stabl':
+        print(f"\n[SUMMARY] STABL regression: Zero features selected in {n_stabl_regression_skipped} out of {N_REPEATS} runs for {model_name} ({data_type}) on {dataset_type}.\n")
+    
+    # Calculate summary statistics for regression
+    mae_mean = np.mean(maes)
+    mae_std = np.std(maes)
+    mae_ci_lower = mae_mean - 1.96 * mae_std / np.sqrt(len(maes))
+    mae_ci_upper = mae_mean + 1.96 * mae_std / np.sqrt(len(maes))
+    
+    rmse_mean = np.mean(rmses)
+    rmse_std = np.std(rmses)
+    rmse_ci_lower = rmse_mean - 1.96 * rmse_std / np.sqrt(len(rmses))
+    rmse_ci_upper = rmse_mean + 1.96 * rmse_std / np.sqrt(len(rmses))
+    
+    # Calculate summary statistics for classification
+    auc_mean = np.mean([auc for auc in aucs if not np.isnan(auc)])
+    auc_std = np.std([auc for auc in aucs if not np.isnan(auc)])
+    if len([auc for auc in aucs if not np.isnan(auc)]) > 0:
+        auc_ci_lower = auc_mean - 1.96 * auc_std / np.sqrt(len([auc for auc in aucs if not np.isnan(auc)]))
+        auc_ci_upper = auc_mean + 1.96 * auc_std / np.sqrt(len([auc for auc in aucs if not np.isnan(auc)]))
+    else:
+        auc_ci_lower = np.nan
+        auc_ci_upper = np.nan
+    
     # Store results
     results = {
-        'aucs': aucs,
         'maes': maes,
         'rmses': rmses,
-        'preterm_metrics_list': preterm_metrics_list,
-        'term_metrics_list': term_metrics_list,
-        'all_coefficients': all_coefficients,
-        'feature_names': X.columns,
+        'aucs': aucs,
+        'predictions': run_predictions,
+        'classification_predictions': run_classification_predictions,
         'summary': {
-            'auc_mean': auc_mean,
             'mae_mean': mae_mean,
             'mae_ci_lower': mae_ci_lower,
             'mae_ci_upper': mae_ci_upper,
             'rmse_mean': rmse_mean,
             'rmse_ci_lower': rmse_ci_lower,
-            'rmse_ci_upper': rmse_ci_upper
+            'rmse_ci_upper': rmse_ci_upper,
+            'auc_mean': auc_mean,
+            'auc_ci_lower': auc_ci_lower,
+            'auc_ci_upper': auc_ci_upper
         }
     }
-
-    # Print summary
-    print(f"\n{model_name} Model Summary ({model_type.upper()} on {dataset_type.upper()}):")
-    print(f"  AUC: {auc_mean:.3f}")
-    print(f"  MAE: {mae_mean:.3f} (95% CI: [{mae_ci_lower:.3f}, {mae_ci_upper:.3f}])")
-    print(f"  RMSE: {rmse_mean:.3f} (95% CI: [{rmse_ci_lower:.3f}, {rmse_ci_upper:.3f}])")
-
-    # Generate plots and tables
-    generate_model_outputs(model_name, data_type, dataset_type, model_type, results, all_fpr, tpr_list, auc_mean)
+    # Add coefficients and feature names for biomarker/combined models
+    if model_name.lower() in ['biomarker', 'combined']:
+        results['all_coefficients'] = all_coefficients
+        results['all_classification_coefficients'] = all_classification_coefficients
+        results['feature_names'] = list(X.columns)
     
     return results
 
 
-def generate_model_outputs(model_name, data_type, dataset_type, model_type, results, all_fpr, tpr_list, auc_mean):
+def generate_model_outputs(model_name, data_type, dataset_type, model_type, results, all_fpr, tpr_list, auc_mean, data_option_label, target_type='gestational_age'):
     """Generate all output files for a single model."""
     
-    # Plot averaged ROC curve
-    mean_tpr = np.mean(tpr_list, axis=0)
-    plot_roc_curve(
-        all_fpr, mean_tpr, auc_mean,
-        filename=f"outputs/plots/{dataset_type}_{model_type}_{model_name.lower()}_roc_avg_over_runs.png"
-    )
+    # Biomarker frequency plot generation removed - now handled by organized plot structure
 
-    # Biomarker frequency plot (only for biomarker model)
-    if data_type == 'biomarker':
-        frequency = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'])
-        plot_feature_frequency(
-            results['feature_names'], 
-            frequency, 
-            filename=f"outputs/plots/{dataset_type}_{model_type}_{model_name.lower()}_biomarker_frequency.png"
-        )
-
-    # Create performance metrics table
+    # Create performance metrics table (regression and classification)
     print(f"\nCreating performance metrics table and plots for {model_name} model ({model_type} on {dataset_type})...")
-    create_metrics_table(
-        results['maes'], results['rmses'], 
-        results['preterm_metrics_list'], results['term_metrics_list'],
-        filename=f"outputs/tables/{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv"
-    )
-    print(f"Performance metrics table saved to outputs/tables/{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv")
+    
+    # Create metrics table for both regression and classification
+    metrics_data = {
+        'Metric': ['MAE', 'RMSE', 'AUC'],
+        'Mean': [results['summary']['mae_mean'], results['summary']['rmse_mean'], results['summary']['auc_mean']],
+        'CI_Lower': [results['summary']['mae_ci_lower'], results['summary']['rmse_ci_lower'], results['summary']['auc_ci_lower']],
+        'CI_Upper': [results['summary']['mae_ci_upper'], results['summary']['rmse_ci_upper'], results['summary']['auc_ci_upper']]
+    }
+    metrics_df = pd.DataFrame(metrics_data)
+    metrics_df['CI_95%'] = metrics_df.apply(lambda row: f"[{row['CI_Lower']:.3f}, {row['CI_Upper']:.3f}]" if not np.isnan(row['CI_Lower']) else "N/A", axis=1)
+    metrics_df['Mean_CI'] = metrics_df.apply(lambda row: f"{row['Mean']:.3f} {row['CI_95%']}" if not np.isnan(row['Mean']) else "N/A", axis=1)
+    
+    # Save table
+    os.makedirs(f"outputs/tables", exist_ok=True)
+    metrics_df.to_csv(f"outputs/tables/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv", index=False)
+    print(f"Performance metrics table saved to outputs/tables/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv")
 
-    # Create bar plots with confidence intervals
+    # Create bar plots with confidence intervals (regression and classification)
     plot_metrics_with_confidence_intervals(
         results['maes'], results['rmses'], 
-        results['preterm_metrics_list'], results['term_metrics_list'],
-        filename=f"outputs/plots/{dataset_type}_{model_type}_{model_name.lower()}_metrics_with_ci.png"
+        [], [],  # Empty lists for preterm/term metrics
+        filename=f"outputs/plots/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_metrics_with_ci_{target_type}.png"
     )
-    print(f"Performance plots with confidence intervals saved to outputs/plots/{dataset_type}_{model_type}_{model_name.lower()}_metrics_with_ci.png")
+    print(f"Performance plots with confidence intervals saved to outputs/plots/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_metrics_with_ci_{target_type}.png")
+    
+    # Create ROC curve if we have classification results
+    if 'classification_predictions' in results and results['classification_predictions']:
+        from src.utils import plot_roc_curve
+        # Aggregate predictions for ROC curve
+        all_true = []
+        all_pred = []
+        for pred in results['classification_predictions']:
+            all_true.extend(pred['true'])
+            all_pred.extend(pred['pred'])
+        
+        if len(set(all_true)) > 1:  # Only plot if we have both classes
+            from sklearn.metrics import roc_curve
+            fpr, tpr, _ = roc_curve(all_true, all_pred)
+            auc = results['summary']['auc_mean']
+            
+            # Determine classification type for filename
+            if target_type == 'gestational_age':
+                classification_type = 'preterm'
+            else:  # target_type == 'birth_weight'
+                classification_type = 'sga'
+            
+            plot_roc_curve(
+                fpr, tpr, auc,
+                filename=f"outputs/plots/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_roc_curve_{classification_type}_{target_type}.png"
+            )
+            print(f"ROC curve saved to outputs/plots/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_roc_curve_{classification_type}_{target_type}.png")
 
 
 def print_detailed_summary(model_name, dataset_type, model_type, results):
@@ -216,36 +457,15 @@ def print_detailed_summary(model_name, dataset_type, model_type, results):
     print(f"Dataset: {dataset_type.upper()}")
     print(f"Model: {model_type.upper()}")
     print(f"Number of runs: {N_REPEATS}")
-    print(f"Preterm cutoff: {PRETERM_CUTOFF} weeks")
-    print(f"Number of features: {len(results['feature_names'])}")
     
     summary = results['summary']
     print("\nOverall Performance:")
     print(f"  MAE: {summary['mae_mean']:.3f} (95% CI: [{summary['mae_ci_lower']:.3f}, {summary['mae_ci_upper']:.3f}])")
     print(f"  RMSE: {summary['rmse_mean']:.3f} (95% CI: [{summary['rmse_ci_lower']:.3f}, {summary['rmse_ci_upper']:.3f}])")
-    print(f"  AUC: {summary['auc_mean']:.3f}")
-
-    # Preterm performance
-    preterm_maes = [m['mae'] for m in results['preterm_metrics_list'] if not np.isnan(m['mae'])]
-    preterm_rmses = [m['rmse'] for m in results['preterm_metrics_list'] if not np.isnan(m['rmse'])]
-    if preterm_maes:
-        preterm_mae_mean, preterm_mae_ci_lower, preterm_mae_ci_upper = compute_confidence_interval(preterm_maes)
-        preterm_rmse_mean, preterm_rmse_ci_lower, preterm_rmse_ci_upper = compute_confidence_interval(preterm_rmses)
-        avg_preterm_count = np.mean([m['count'] for m in results['preterm_metrics_list']])
-        print(f"\nPreterm Performance (avg n={avg_preterm_count:.1f}):")
-        print(f"  MAE: {preterm_mae_mean:.3f} (95% CI: [{preterm_mae_ci_lower:.3f}, {preterm_mae_ci_upper:.3f}])")
-        print(f"  RMSE: {preterm_rmse_mean:.3f} (95% CI: [{preterm_rmse_ci_lower:.3f}, {preterm_rmse_ci_upper:.3f}])")
-
-    # Term performance
-    term_maes = [m['mae'] for m in results['term_metrics_list'] if not np.isnan(m['mae'])]
-    term_rmses = [m['rmse'] for m in results['term_metrics_list'] if not np.isnan(m['rmse'])]
-    if term_maes:
-        term_mae_mean, term_mae_ci_lower, term_mae_ci_upper = compute_confidence_interval(term_maes)
-        term_rmse_mean, term_rmse_ci_lower, term_rmse_ci_upper = compute_confidence_interval(term_rmses)
-        avg_term_count = np.mean([m['count'] for m in results['term_metrics_list']])
-        print(f"\nTerm Performance (avg n={avg_term_count:.1f}):")
-        print(f"  MAE: {term_mae_mean:.3f} (95% CI: [{term_mae_ci_lower:.3f}, {term_mae_ci_upper:.3f}])")
-        print(f"  RMSE: {term_rmse_mean:.3f} (95% CI: [{term_rmse_ci_lower:.3f}, {term_rmse_ci_upper:.3f}])")
+    if not np.isnan(summary['auc_mean']):
+        print(f"  AUC: {summary['auc_mean']:.3f} (95% CI: [{summary['auc_ci_lower']:.3f}, {summary['auc_ci_upper']:.3f}])")
+    else:
+        print(f"  AUC: N/A (insufficient data)")
 
     print("="*60)
 
@@ -262,12 +482,12 @@ def create_model_comparison(all_results, model_type, dataset_type):
         summary = results['summary']
         comparison_data.append({
             'Model': model_name,
-            'AUC': f"{summary['auc_mean']:.3f}",
             'MAE': f"{summary['mae_mean']:.3f}",
             'MAE_CI': f"[{summary['mae_ci_lower']:.3f}, {summary['mae_ci_upper']:.3f}]",
             'RMSE': f"{summary['rmse_mean']:.3f}",
             'RMSE_CI': f"[{summary['rmse_ci_lower']:.3f}, {summary['rmse_ci_upper']:.3f}]",
-            'Features': len(results['feature_names'])
+            'AUC': f"{summary['auc_mean']:.3f}" if not np.isnan(summary['auc_mean']) else "N/A",
+            'AUC_CI': f"[{summary['auc_ci_lower']:.3f}, {summary['auc_ci_upper']:.3f}]" if not np.isnan(summary['auc_mean']) else "N/A"
         })
 
     comparison_df = pd.DataFrame(comparison_data)
@@ -275,78 +495,493 @@ def create_model_comparison(all_results, model_type, dataset_type):
     print(comparison_df.to_string(index=False))
 
     # Save comparison table
+    os.makedirs("outputs/tables", exist_ok=True)
     comparison_df.to_csv(f"outputs/tables/{dataset_type}_{model_type}_model_comparison.csv", index=False)
     print(f"\nModel comparison saved to: outputs/tables/{dataset_type}_{model_type}_model_comparison.csv")
 
     # Find best models
-    best_auc_model = max(all_results.items(), key=lambda x: x[1]['summary']['auc_mean'])
     best_mae_model = min(all_results.items(), key=lambda x: x[1]['summary']['mae_mean'])
     best_rmse_model = min(all_results.items(), key=lambda x: x[1]['summary']['rmse_mean'])
+    
+    # Find best AUC model (only if we have valid AUC values)
+    valid_auc_models = [(name, results) for name, results in all_results.items() if not np.isnan(results['summary']['auc_mean'])]
+    if valid_auc_models:
+        best_auc_model = max(valid_auc_models, key=lambda x: x[1]['summary']['auc_mean'])
+        print(f"\nBest Models:")
+        print(f"  Best MAE: {best_mae_model[0]} ({best_mae_model[1]['summary']['mae_mean']:.3f})")
+        print(f"  Best RMSE: {best_rmse_model[0]} ({best_rmse_model[1]['summary']['rmse_mean']:.3f})")
+        print(f"  Best AUC: {best_auc_model[0]} ({best_auc_model[1]['summary']['auc_mean']:.3f})")
+    else:
+        print(f"\nBest Models:")
+        print(f"  Best MAE: {best_mae_model[0]} ({best_mae_model[1]['summary']['mae_mean']:.3f})")
+        print(f"  Best RMSE: {best_rmse_model[0]} ({best_rmse_model[1]['summary']['rmse_mean']:.3f})")
+        print(f"  Best AUC: N/A (no valid classification results)")
 
-    print(f"\nBest Models:")
-    print(f"  Best AUC: {best_auc_model[0]} ({best_auc_model[1]['summary']['auc_mean']:.3f})")
-    print(f"  Best MAE: {best_mae_model[0]} ({best_mae_model[1]['summary']['mae_mean']:.3f})")
-    print(f"  Best RMSE: {best_rmse_model[0]} ({best_rmse_model[1]['summary']['rmse_mean']:.3f})")
 
-
-def main():
-    """Main execution function."""
+def main(target_type='gestational_age'):
+    """
+    Main execution function.
+    
+    Args:
+        target_type (str): Target variable type ('gestational_age' or 'birth_weight')
+    """
     # Configuration
-    dataset_types = ['heel', 'cord']  # Train on both datasets
-    model_types = ['lasso', 'elasticnet', 'stabl']  # Run all model types
-
-    # Define the 3 model configurations as requested by PI
+    dataset_types = ['heel', 'cord']
+    model_types = ['lasso', 'elasticnet']
     model_configs = [
-        {'name': 'Clinical', 'data_type': 'clinical'},
-        {'name': 'Biomarker', 'data_type': 'biomarker'},
-        {'name': 'Combined', 'data_type': 'combined'}
+        {'name': 'Clinical', 'data_type': 'clinical', 'allowed_models': ['lasso', 'elasticnet']},
+        {'name': 'Biomarker', 'data_type': 'biomarker', 'allowed_models': ['lasso', 'elasticnet']},
+        {'name': 'Combined', 'data_type': 'combined', 'allowed_models': ['lasso', 'elasticnet']}
     ]
-
-    # Run each dataset type
-    for dataset_type in dataset_types:
-        print(f"\n{'='*80}")
-        print(f"TRAINING ON {dataset_type.upper()} DATASET")
-        print(f"{'='*80}")
-        
-        # Run each model type
-        for model_type in model_types:
+    
+    print(f"\n{'='*80}")
+    print(f"RUNNING PIPELINE FOR TARGET: {target_type.upper()}")
+    print(f"{'='*80}")
+    summary_rows = []
+    all_results = {}
+    for data_option in [1, 2, 3]:
+        data_option_label = DATA_OPTION_LABELS[data_option]
+        print(f"\n{'#'*80}")
+        print(f"RUNNING DATA OPTION {data_option}: {data_option_label}")
+        print(f"{'#'*80}")
+        for dataset_type in dataset_types:
             print(f"\n{'='*80}")
-            print(f"TRAINING WITH {model_type.upper()} MODEL ON {dataset_type.upper()} DATA")
+            print(f"TRAINING ON {dataset_type.upper()} DATASET [{data_option_label}]")
             print(f"{'='*80}")
+            for model_type in model_types:
+                print(f"\n{'='*80}")
+                print(f"TRAINING WITH {model_type.upper()} MODEL ON {dataset_type.upper()} DATA [{data_option_label}]")
+                print(f"{'='*80}")
+                model_results = {}
+                for config in model_configs:
+                    model_name = config['name']
+                    data_type = config['data_type']
+                    allowed_models = config['allowed_models']
+                    if model_type not in allowed_models:
+                        print(f"Skipping {model_name} model with {model_type} (not allowed)")
+                        continue
+                    results = run_single_model(model_name, data_type, dataset_type, model_type, data_option, data_option_label, target_type)
+                    model_results[model_name] = results
+                    all_results[f"{data_option_label}_{dataset_type}_{model_type}_{model_name}"] = results
+                    # Update output/plot filenames in generate_model_outputs as well
+                    generate_model_outputs(model_name, data_type, dataset_type, model_type, results, None, None, results['summary']['auc_mean'], data_option_label, target_type)
+                    print_detailed_summary(model_name, dataset_type, model_type, results)
+                    # --- Collect summary row for MAE, RMSE, AUC (for summary plots) ---
+                    mae_mean = results['summary']['mae_mean']
+                    mae_ci_lower = results['summary']['mae_ci_lower']
+                    mae_ci_upper = results['summary']['mae_ci_upper']
+                    rmse_mean = results['summary']['rmse_mean']
+                    rmse_ci_lower = results['summary']['rmse_ci_lower']
+                    rmse_ci_upper = results['summary']['rmse_ci_upper']
+                    auc_mean = results['summary']['auc_mean']
+                    auc_ci_lower = results['summary']['auc_ci_lower']
+                    auc_ci_upper = results['summary']['auc_ci_upper']
+                    summary_rows.append({
+                        'Dataset': dataset_type,
+                        'Model': model_name,
+                        'ModelType': model_type,  # Add model type to distinguish between Lasso, ElasticNet, STABL
+                        'DataOption': data_option_label,  # Add data option to distinguish between both_samples, heel_all, cord_all
+                        'MAE': mae_mean,
+                        'MAE_CI_Lower': mae_ci_lower,
+                        'MAE_CI_Upper': mae_ci_upper,
+                        'RMSE': rmse_mean,
+                        'RMSE_CI_Lower': rmse_ci_lower,
+                        'RMSE_CI_Upper': rmse_ci_upper,
+                        'AUC': auc_mean,
+                        'AUC_CI_Lower': auc_ci_lower,
+                        'AUC_CI_Upper': auc_ci_upper
+                    })
+
+                # Create model comparison for this model type (only if we have results)
+                if model_results:
+                    create_model_comparison(model_results, model_type, f"{data_option_label}_{dataset_type}")
+
+                    # Final summary for this model type
+                    print(f"\n{'='*80}")
+                    print(f"ALL MODELS COMPLETED FOR {model_type.upper()} ON {dataset_type.upper()}!")
+                    print("="*80)
+                    print("Generated files:")
+                    for model_name in model_results.keys():
+                        print(f"  {model_name} model:")
+                        print(f"    - Performance table: outputs/tables/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv")
+                        print(f"    - Performance plots: outputs/plots/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_metrics_with_ci.png")
+                        # print(f"    - ROC curve: outputs/plots/{dataset_type}_{model_type}_{model_name.lower()}_roc_avg_over_runs.png") # Removed ROC curve
+                        if model_name == 'Biomarker':
+                            print(f"    - Biomarker frequency: outputs/plots/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_biomarker_frequency.png")
+                    print(f"  - Model comparison: outputs/tables/{data_option_label}_{dataset_type}_{model_type}_model_comparison.csv")
+                    print("="*80)
+                else:
+                    print(f"\n{'='*80}")
+                    print(f"NO MODELS TRAINED FOR {model_type.upper()} ON {dataset_type.upper()}!")
+                    print("="*80)
+
+    # --- After all training, generate separate summary plots for each model type and data option ---
+    summary_df = pd.DataFrame(summary_rows)
+    print('summary_df contents:')
+    print(summary_df)
+    
+    # Create separate plots for each model type and data option (including AUC)
+    for model_type in ['lasso', 'elasticnet']:
+        for data_option in [1, 2, 3]:
+            data_option_label = DATA_OPTION_LABELS[data_option]
             
-            # Store results for all models for this model type
-            all_results = {}
-
-            # Run each model configuration
-            for config in model_configs:
-                model_name = config['name']
-                data_type = config['data_type']
+            # Filter data for this model type and data option
+            model_df = summary_df[(summary_df['ModelType'] == model_type) & (summary_df['DataOption'] == data_option_label)].copy()
+            if not model_df.empty:
+                # Group by Dataset and Model (feature sets) for this specific model type
+                model_df_grouped = model_df.groupby(["Dataset", "Model"], as_index=False).mean(numeric_only=True)
+                # Capitalize model type for label
+                model_type_label = model_type.capitalize()
                 
-                # Run the model
-                results = run_single_model(model_name, data_type, dataset_type, model_type)
-                all_results[model_name] = results
+                # Create summary plots for this specific data option
+                plot_summary_mae_by_dataset_and_model(
+                    model_df_grouped, 
+                    filename=f"outputs/plots/summary_mae_by_dataset_and_model_{model_type}_{data_option_label}_{target_type}.png",
+                    model_type_label=f"{model_type_label} ({data_option_label})"
+                )
+                plot_summary_rmse_by_dataset_and_model(
+                    model_df_grouped, 
+                    filename=f"outputs/plots/summary_rmse_by_dataset_and_model_{model_type}_{data_option_label}_{target_type}.png",
+                    model_type_label=f"{model_type_label} ({data_option_label})"
+                )
+                # Add AUC summary plot
+                plot_summary_auc_by_dataset_and_model(
+                    model_df_grouped, 
+                    filename=f"outputs/plots/summary_auc_by_dataset_and_model_{model_type}_{data_option_label}_{target_type}.png",
+                    model_type_label=f"{model_type_label} ({data_option_label})"
+                )
+    
+    # Also create the original aggregated plots for comparison
+    for model_type in ['lasso', 'elasticnet']:
+        # Filter data for this model type
+        model_df = summary_df[summary_df['ModelType'] == model_type].copy()
+        if not model_df.empty:
+            # Group by Dataset and Model (feature sets) for this specific model type
+            model_df_grouped = model_df.groupby(["Dataset", "Model"], as_index=False).mean(numeric_only=True)
+            # Capitalize model type for label
+            model_type_label = model_type.capitalize()
+            plot_summary_mae_by_dataset_and_model(
+                model_df_grouped, 
+                filename=f"outputs/plots/summary_mae_by_dataset_and_model_{model_type}_{target_type}.png",
+                model_type_label=model_type_label
+            )
+            plot_summary_rmse_by_dataset_and_model(
+                model_df_grouped, 
+                filename=f"outputs/plots/summary_rmse_by_dataset_and_model_{model_type}_{target_type}.png",
+                model_type_label=model_type_label
+            )
+            # Add AUC summary plot
+            plot_summary_auc_by_dataset_and_model(
+                model_df_grouped, 
+                filename=f"outputs/plots/summary_auc_by_dataset_and_model_{model_type}_{target_type}.png",
+                model_type_label=model_type_label
+            )
+    
+    # --- Create combined scatter plots with all model types (Clinical, Biomarker, Combined) ---
+    # Create scatter plots for each data option that show all model types together
+    for data_option in [1, 2, 3]:
+        data_option_label = DATA_OPTION_LABELS[data_option]
+        
+        # Determine which datasets to process based on data option
+        if data_option == 1:
+            # Option 1: both samples - process both heel and cord
+            datasets_to_process = ['heel', 'cord']
+        elif data_option == 2:
+            # Option 2: all heel - only process heel
+            datasets_to_process = ['heel']
+        elif data_option == 3:
+            # Option 3: all cord - only process cord
+            datasets_to_process = ['cord']
+        
+        for dataset in datasets_to_process:
+            # Collect predictions from all model types for this dataset and data option
+            pred_rows = []
+            
+            for model_type in ['lasso', 'elasticnet']:
+                for model_name in ['Clinical', 'Biomarker', 'Combined']:
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                    
+                    if result_key in all_results:
+                        result = all_results[result_key]
+                        for run in result.get('predictions', []):
+                            true_vals = run.get('true', [])
+                            pred_vals = run.get('pred', [])
+                            for t, p in zip(true_vals, pred_vals):
+                                # Determine column names based on target type
+                                if target_type == 'birth_weight':
+                                    true_col = 'True_BW'
+                                    pred_col = 'Pred_BW'
+                                else:  # gestational_age
+                                    true_col = 'True_GA'
+                                    pred_col = 'Pred_GA'
+                                
+                                pred_rows.append({
+                                    true_col: float(t),
+                                    pred_col: float(p),
+                                    'Model': model_name,
+                                    'ModelType': model_type,
+                                    'Dataset': dataset,
+                                    'DataOption': data_option_label
+                                })
+            
+            if pred_rows:
+                preds_df = pd.DataFrame(pred_rows)
+                plot_true_vs_predicted_scatter(
+                    preds_df,
+                    filename=f"outputs/plots/true_vs_predicted_scatter_{data_option_label}_{dataset}_{target_type}.png",
+                    target_type=target_type
+                )
+                print(f"Combined scatter plot for {data_option_label} {dataset} saved: true_vs_predicted_scatter_{data_option_label}_{dataset}_{target_type}.png")
+    
+    # Also create overall combined scatter plots for each model type across all data options
+    for model_type in ['lasso', 'elasticnet']:
+        # Collect predictions from all data options and datasets for this model type
+        pred_rows = []
+        
+        for data_option in [1, 2, 3]:
+            data_option_label = DATA_OPTION_LABELS[data_option]
+            
+            # Determine which datasets to process based on data option
+            if data_option == 1:
+                datasets_to_process = ['heel', 'cord']
+            elif data_option == 2:
+                datasets_to_process = ['heel']
+            elif data_option == 3:
+                datasets_to_process = ['cord']
+            
+            for dataset in datasets_to_process:
+                for model_name in ['Clinical', 'Biomarker', 'Combined']:
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                    
+                    if result_key in all_results:
+                        result = all_results[result_key]
+                        for run in result.get('predictions', []):
+                            true_vals = run.get('true', [])
+                            pred_vals = run.get('pred', [])
+                            for t, p in zip(true_vals, pred_vals):
+                                # Determine column names based on target type
+                                if target_type == 'birth_weight':
+                                    true_col = 'True_BW'
+                                    pred_col = 'Pred_BW'
+                                else:  # gestational_age
+                                    true_col = 'True_GA'
+                                    pred_col = 'Pred_GA'
+                                
+                                pred_rows.append({
+                                    true_col: float(t),
+                                    pred_col: float(p),
+                                    'Model': model_name,
+                                    'ModelType': model_type,
+                                    'Dataset': dataset,
+                                    'DataOption': data_option_label
+                                })
+        
+        if pred_rows:
+            preds_df = pd.DataFrame(pred_rows)
+            plot_true_vs_predicted_scatter(
+                preds_df,
+                filename=f"outputs/plots/true_vs_predicted_scatter_{model_type}_{target_type}.png",
+                target_type=target_type
+            )
+            print(f"Overall combined scatter plot for {model_type} saved: true_vs_predicted_scatter_{model_type}_{target_type}.png")
+    
+    # Create the final overall scatter plot with all models combined
+    all_pred_rows = []
+    for data_option in [1, 2, 3]:
+        data_option_label = DATA_OPTION_LABELS[data_option]
+        
+        # Determine which datasets to process based on data option
+        if data_option == 1:
+            datasets_to_process = ['heel', 'cord']
+        elif data_option == 2:
+            datasets_to_process = ['heel']
+        elif data_option == 3:
+            datasets_to_process = ['cord']
+        
+        for dataset in datasets_to_process:
+            for model_type in ['lasso', 'elasticnet']:
+                for model_name in ['Clinical', 'Biomarker', 'Combined']:
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                    
+                    if result_key in all_results:
+                        result = all_results[result_key]
+                        for run in result.get('predictions', []):
+                            true_vals = run.get('true', [])
+                            pred_vals = run.get('pred', [])
+                            for t, p in zip(true_vals, pred_vals):
+                                # Determine column names based on target type
+                                if target_type == 'birth_weight':
+                                    true_col = 'True_BW'
+                                    pred_col = 'Pred_BW'
+                                else:  # gestational_age
+                                    true_col = 'True_GA'
+                                    pred_col = 'Pred_GA'
+                                
+                                all_pred_rows.append({
+                                    true_col: float(t),
+                                    pred_col: float(p),
+                                    'Model': model_name,
+                                    'ModelType': model_type,
+                                    'Dataset': dataset,
+                                    'DataOption': data_option_label
+                                })
+    
+    if all_pred_rows:
+        all_preds_df = pd.DataFrame(all_pred_rows)
+        plot_true_vs_predicted_scatter(all_preds_df, filename=f"outputs/plots/true_vs_predicted_scatter_{target_type}.png", target_type=target_type)
+        print(f"Final overall scatter plot saved: true_vs_predicted_scatter_{target_type}.png")
+    else:
+        print("No predictions found for scatter plot!")
+
+    # Create biomarker frequency plots
+    # plot_biomarker_frequency_heel_vs_cord(all_results, filename="outputs/plots/biomarker_frequency.png") # This line is removed
+
+    # Create biomarker frequency comparison plots (Heel vs Cord) for each model type
+    for model_type in ['lasso', 'elasticnet']:
+        # Option 1: Heel vs Cord comparison using both_samples data
+        option1_results = {k: v for k, v in all_results.items() if 'both_samples' in k}
+        if option1_results:
+            plot_biomarker_frequency_heel_vs_cord(
+                option1_results, 
+                model_type, 
+                filename=f"outputs/plots/biomarker_frequency_heel_vs_cord_{model_type}_{target_type}_option1_both_samples.png",
+                target_type=target_type
+            )
+            print(f"Option 1 (both_samples) heel vs cord comparison plot saved: biomarker_frequency_heel_vs_cord_{model_type}_{target_type}_option1_both_samples.png")
+        
+        # Options 2+3: Heel vs Cord comparison using heel_all and cord_all data
+        option2_3_results = {k: v for k, v in all_results.items() if 'heel_all' in k or 'cord_all' in k}
+        if option2_3_results:
+            plot_biomarker_frequency_heel_vs_cord(
+                option2_3_results, 
+                model_type, 
+                filename=f"outputs/plots/biomarker_frequency_heel_vs_cord_{model_type}_{target_type}_options2_3_heel_cord_all.png",
+                target_type=target_type
+            )
+            print(f"Options 2+3 (heel_all + cord_all) heel vs cord comparison plot saved: biomarker_frequency_heel_vs_cord_{model_type}_{target_type}_options2_3_heel_cord_all.png")
+
+    # --- After all training, generate biomarker frequency plot for best model (by RMSE) for each dataset and data option ---
+    from src.utils import count_high_weight_biomarkers, plot_feature_frequency
+    
+    # Generate best model biomarker frequency plots for each data option
+    for data_option in [1, 2, 3]:
+        data_option_label = DATA_OPTION_LABELS[data_option]
+        
+        # Determine which datasets to process based on data option
+        if data_option == 1:
+            # Option 1: both samples - process both heel and cord
+            datasets_to_process = ['heel', 'cord']
+        elif data_option == 2:
+            # Option 2: all heel - only process heel
+            datasets_to_process = ['heel']
+        elif data_option == 3:
+            # Option 3: all cord - only process cord
+            datasets_to_process = ['cord']
+        
+        for dataset in datasets_to_process:
+            # Filter summary_df for biomarker models of this dataset and data option
+            biomarker_df = summary_df[(summary_df['Dataset'] == dataset) & (summary_df['Model'] == 'Biomarker')]
+            if biomarker_df.empty:
+                print(f"No biomarker models found for {dataset} dataset in {data_option_label}.")
+                continue
+            # Find the row with the lowest RMSE (best regression performance)
+            best_row = biomarker_df.loc[biomarker_df['RMSE'].idxmin()]
+            best_rmse = best_row['RMSE']
+            best_model_type = best_row['ModelType']
+            
+            # Get the results from all_results dictionary
+            result_key = f"{data_option_label}_{dataset}_{best_model_type}_Biomarker"
+            if result_key not in all_results:
+                print(f"Could not find results for {result_key} in all_results.")
+                continue
                 
-                # Print detailed summary
-                print_detailed_summary(model_name, dataset_type, model_type, results)
+            results = all_results[result_key]
+            if 'all_coefficients' not in results or 'feature_names' not in results:
+                print(f"No coefficients or feature names found for best biomarker model in {dataset} for {data_option_label}.")
+                continue
+                
+            freq = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.01)
+            
+            # Debug: Print coefficient statistics
+            print(f"\n[DEBUG] Coefficient statistics for {data_option_label} {dataset} {best_model_type} Biomarker:")
+            all_coefs = np.array(results['all_coefficients'])
+            print(f"  Shape: {all_coefs.shape}")
+            print(f"  Min: {all_coefs.min():.6f}")
+            print(f"  Max: {all_coefs.max():.6f}")
+            print(f"  Mean: {all_coefs.mean():.6f}")
+            print(f"  Std: {all_coefs.std():.6f}")
+            print(f"  Non-zero coefficients: {np.count_nonzero(all_coefs)}")
+            print(f"  Features with any non-zero coef: {np.count_nonzero(np.any(all_coefs != 0, axis=0))}")
+            
+            # Debug: Show frequency calculation with different thresholds
+            freq_01 = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.01)
+            freq_001 = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.001)
+            freq_0001 = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.0001)
+            print(f"  Features with freq > 0 (threshold=0.01): {np.sum(freq_01 > 0)}")
+            print(f"  Features with freq > 0 (threshold=0.001): {np.sum(freq_001 > 0)}")
+            print(f"  Features with freq > 0 (threshold=0.0001): {np.sum(freq_0001 > 0)}")
+            
+            plot_feature_frequency(
+                results['feature_names'],
+                freq,
+                filename=f"outputs/plots/best_model_biomarker_frequency_{data_option_label}_{dataset}_{target_type}.png",
+                model_name=best_model_type.capitalize(),
+                dataset_name=f"{dataset.capitalize()} ({data_option_label}) - {target_type}"
+            )
+            print(f"Biomarker frequency plot for best model in {dataset} ({data_option_label}) saved to outputs/plots/best_model_biomarker_frequency_{data_option_label}_{dataset}_{target_type}.png")
+            
+            # Also generate classification biomarker frequency plot if we have classification coefficients
+            if 'all_classification_coefficients' in results and results['all_classification_coefficients']:
+                classification_freq = count_high_weight_biomarkers(results['all_classification_coefficients'], results['feature_names'], threshold=0.01)
+                
+                # Determine classification type for title
+                if target_type == 'gestational_age':
+                    classification_type = 'preterm_classification'
+                    classification_title = 'Preterm Classification'
+                else:  # target_type == 'birth_weight'
+                    classification_type = 'sga_classification'
+                    classification_title = 'SGA Classification'
+                
+                plot_feature_frequency(
+                    results['feature_names'],
+                    classification_freq,
+                    filename=f"outputs/plots/best_model_biomarker_frequency_{data_option_label}_{dataset}_{classification_type}.png",
+                    model_name=best_model_type.capitalize(),
+                    dataset_name=f"{dataset.capitalize()} ({data_option_label}) - {classification_title}"
+                )
+                print(f"Classification biomarker frequency plot for best model in {dataset} ({data_option_label}) saved to outputs/plots/best_model_biomarker_frequency_{data_option_label}_{dataset}_{classification_type}.png")
 
-            # Create model comparison for this model type
-            create_model_comparison(all_results, model_type, dataset_type)
-
-            # Final summary for this model type
-            print(f"\n{'='*80}")
-            print(f"ALL MODELS COMPLETED FOR {model_type.upper()} ON {dataset_type.upper()}!")
-            print("="*80)
-            print("Generated files:")
-            for model_name in all_results.keys():
-                print(f"  {model_name} model:")
-                print(f"    - Performance table: outputs/tables/{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv")
-                print(f"    - Performance plots: outputs/plots/{dataset_type}_{model_type}_{model_name.lower()}_metrics_with_ci.png")
-                print(f"    - ROC curve: outputs/plots/{dataset_type}_{model_type}_{model_name.lower()}_roc_avg_over_runs.png")
-                if model_name == 'Biomarker':
-                    print(f"    - Biomarker frequency: outputs/plots/{dataset_type}_{model_type}_{model_name.lower()}_biomarker_frequency.png")
-            print(f"  - Model comparison: outputs/tables/{dataset_type}_{model_type}_model_comparison.csv")
-            print("="*80)
+    # --- Final summary ---
+    print(f"\n{'='*80}")
+    print("PIPELINE COMPLETE!")
+    print(f"{'='*80}")
+    print("All regression and classification models completed successfully!")
+    print("Generated plots:")
+    print("- Individual model type plots (MAE, RMSE, AUC)")
+    print("- True vs predicted scatter plots")
+    print("- ROC curves for classification")
+    print("- Biomarker frequency comparison plots (Heel vs Cord)")
+    print("- Best model biomarker frequency plots")
+    
+    # Save all_results for inspection
+    import pickle
+    with open("all_results.pkl", "wb") as f:
+        pickle.dump(all_results, f)
+    print("Saved all_results.pkl for coefficient inspection")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    
+    # Parse command line arguments
+    if len(sys.argv) > 1:
+        target_type = sys.argv[1].lower()
+        if target_type not in ['gestational_age', 'birth_weight']:
+            print("Error: target_type must be 'gestational_age' or 'birth_weight'")
+            print("Usage: python3 main.py [gestational_age|birth_weight]")
+            sys.exit(1)
+    else:
+        target_type = 'gestational_age'  # Default
+    
+    # Run the pipeline
+    main(target_type)

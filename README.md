@@ -1,6 +1,6 @@
 # Gestational Age Prediction and Preterm Birth Classification
 
-This repository contains a comprehensive machine learning pipeline for predicting gestational age and classifying preterm births using serum biomarkers and clinical data.
+This repository contains a comprehensive machine learning pipeline for predicting gestational age and classifying preterm births using serum biomarkers and clinical data from cord and heel blood samples.
 
 ## Overview
 
@@ -15,28 +15,35 @@ The project implements three different model approaches to predict gestational a
 - **Multiple Model Types**: Support for Lasso, ElasticNet, and STABL algorithms
 - **Comprehensive Evaluation**: MAE, RMSE, and AUC metrics with confidence intervals
 - **Separate Analysis**: Performance evaluation for preterm vs term babies
-- **Feature Importance**: Biomarker frequency analysis for interpretability
-- **Visualization**: ROC curves, performance plots, and comparison tables
+- **Feature Importance**: Biomarker frequency analysis and SHAP-based interpretability
+- **Advanced Visualization**: ROC curves, performance plots, SHAP plots, and comparison tables
 - **Reproducible Results**: Multiple training runs with statistical significance
+- **SHAP Analysis**: Feature importance analysis using SHAP values for model interpretability
 
 ## Project Structure
 
 ```
 serum_biomarkers/
-├── main.py                 # Main execution script
-├── src/                    # Source code modules
-│   ├── config.py          # Configuration parameters
-│   ├── data_loader.py     # Data loading and preprocessing
-│   ├── model.py           # Model definitions and training
-│   ├── metrics.py         # Performance metrics calculation
-│   └── utils.py           # Utility functions and plotting
-├── data/                   # Data files (not included in repo)
-├── outputs/                # Generated outputs
-│   ├── models/            # Model outputs and coefficients
-│   ├── plots/             # Generated plots and visualizations
-│   └── tables/            # Performance metrics tables
-├── notebooks/              # Jupyter notebooks for exploration
-└── README.md              # This file
+├── main.py                           # Main execution script
+├── regenerate_biomarker_frequency.py # Regenerate biomarker frequency plots
+├── generate_shap_analysis.py         # Generate SHAP analysis for existing models
+├── selected_feature_names.py         # Analyze STABL feature selection patterns
+├── inspect_model_output.py           # Inspect model output files
+├── analyze_stabl_failures.py         # Analyze STABL failure patterns
+├── src/                              # Source code modules
+│   ├── config.py                     # Configuration parameters
+│   ├── data_loader.py                # Data loading and preprocessing
+│   ├── model.py                      # Model definitions and training
+│   ├── metrics.py                    # Performance metrics calculation
+│   └── utils.py                      # Utility functions and plotting
+├── data/                             # Data files (not included in repo)
+├── outputs/                          # Generated outputs
+│   ├── models/                       # Model outputs and coefficients
+│   ├── plots/                        # Generated plots and visualizations
+│   └── tables/                       # Performance metrics tables
+├── notebooks/                        # Jupyter notebooks for exploration
+├── requirements.txt                  # Python dependencies
+└── README.md                         # This file
 ```
 
 ## Installation
@@ -69,19 +76,45 @@ python main.py
 ```
 
 This will:
-- Train all three models (Clinical, Biomarker, Combined)
+- Train all three models (Clinical, Biomarker, Combined) for both datasets (heel, cord)
 - Generate performance metrics with confidence intervals
 - Create visualizations and comparison tables
+- Generate SHAP analysis for the best models
 - Save all outputs to the `outputs/` directory
+
+### Regenerate Biomarker Frequency Plots
+
+To regenerate biomarker frequency and SHAP-based preterm/term scatter plots:
+
+```bash
+python regenerate_biomarker_frequency.py
+```
+
+### Generate SHAP Analysis
+
+To generate SHAP analysis for existing trained models:
+
+```bash
+python generate_shap_analysis.py
+```
+
+### Analyze STABL Feature Selection
+
+To analyze STABL feature selection patterns:
+
+```bash
+python selected_feature_names.py
+```
 
 ### Configuration
 
-Modify the configuration in `main.py`:
+Modify the configuration in `src/config.py`:
 
 ```python
-# Configuration
-dataset_type = 'heel'  # 'cord' or 'heel'
-model_type = 'lasso'   # 'lasso', 'elasticnet', or 'stabl'
+# Model training parameters
+N_REPEATS = 100  # Number of training runs for statistical significance
+TEST_SIZE = 0.2  # Fraction of data to use for testing (20%)
+PRETERM_CUTOFF = 37  # Gestational age cutoff for preterm classification (weeks)
 ```
 
 ### Output Files
@@ -94,8 +127,19 @@ The pipeline generates the following outputs:
 - `{model}_roc_avg_over_runs.png` - ROC curves averaged over runs
 - `{model}_biomarker_frequency.png` - Feature importance (biomarker model only)
 
+**SHAP Analysis:**
+- `shap_summary_{dataset}_{model}_{type}.png` - SHAP summary plots
+- `shap_importance_{dataset}_{model}_{type}.png` - SHAP feature importance plots
+- `shap_waterfall_{dataset}_{model}_{type}.png` - SHAP waterfall plots
+- `shap_ranking_{dataset}_{model}_{type}.csv` - SHAP feature importance rankings
+- `best_model_shap_preterm_term_scatter_{dataset}.png` - SHAP-based preterm vs term scatter plots
+
 **Overall:**
 - `model_comparison.csv` - Comparison table of all models
+- `summary_auc_by_dataset_and_model.png` - Summary AUC plots
+- `summary_mae_by_dataset_and_model.png` - Summary MAE plots
+- `summary_rmse_by_dataset_and_model.png` - Summary RMSE plots
+- `true_vs_predicted_scatter.png` - Combined true vs predicted scatter plot
 
 ## Data Requirements
 
@@ -129,6 +173,16 @@ The pipeline evaluates models using:
 - **Confidence Intervals**: 95% confidence intervals for all metrics
 - **Separate Analysis**: Performance breakdown for preterm (<37 weeks) vs term (≥37 weeks) babies
 
+## SHAP Analysis
+
+The pipeline includes comprehensive SHAP (SHapley Additive exPlanations) analysis for model interpretability:
+
+- **SHAP Summary Plots**: Show feature importance and interactions
+- **SHAP Feature Importance**: Horizontal bar charts of feature importance
+- **SHAP Waterfall Plots**: Individual sample explanations
+- **SHAP Rankings**: CSV files with feature importance rankings
+- **Preterm vs Term Analysis**: SHAP-based scatter plots showing feature importance differences between preterm and term pregnancies
+
 ## Contributing
 
 1. Fork the repository
@@ -148,8 +202,8 @@ If you use this code in your research, please cite:
 ```bibtex
 @software{serum_biomarkers,
   title={Gestational Age Prediction and Preterm Birth Classification},
-  author={Your Name},
-  year={2024},
+  author={Diba Dindoust},
+  year={2025},
   url={https://github.com/yourusername/serum_biomarkers}
 }
 ```
