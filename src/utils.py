@@ -18,7 +18,9 @@ import pandas as pd
 import numpy as np
 import os
 import pickle
-import shap
+from adjustText import adjust_text
+
+print("Loaded src/utils.py from:", __file__)
 
 
 def save_model(model, path):
@@ -859,62 +861,50 @@ def plot_biomarker_preterm_term_scatter(term_freq, preterm_freq, feature_names, 
     plt.close()
 
 
-def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, target_type='gestational_age'):
+def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, target_type='gestational_age', top_n=20):
     """
     Create a scatter plot comparing biomarker frequencies between heel and cord datasets.
-    
     Args:
         model_results (dict): Dictionary containing model results
         model_type (str): Type of model ('lasso', 'elasticnet', 'stabl')
         filename (str): Output filename for the plot
         target_type (str): Target type ('gestational_age' or 'birth_weight')
+        top_n (int or None): Number of top biomarkers to label (by total frequency). If None, label all above threshold.
     """
     import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
     import seaborn as sns
-    
+    from adjustText import adjust_text
+
     # Extract biomarker frequencies for heel and cord datasets
     heel_freq = {}
     cord_freq = {}
-    
     for key, result in model_results.items():
         if 'heel' in key and 'biomarker' in key and model_type in key:
             if 'all_coefficients' in result and result['all_coefficients'] is not None:
                 all_coefs = result['all_coefficients']
                 feature_names = result.get('feature_names', [f'Feature_{i}' for i in range(len(all_coefs[0]))])
-                
-                # Calculate frequency across all runs
                 for run_coefs in all_coefs:
                     for i, (name, val) in enumerate(zip(feature_names, run_coefs)):
                         if name not in heel_freq:
                             heel_freq[name] = []
                         heel_freq[name].append(abs(val))
-        
         elif 'cord' in key and 'biomarker' in key and model_type in key:
             if 'all_coefficients' in result and result['all_coefficients'] is not None:
                 all_coefs = result['all_coefficients']
                 feature_names = result.get('feature_names', [f'Feature_{i}' for i in range(len(all_coefs[0]))])
-                
-                # Calculate frequency across all runs
                 for run_coefs in all_coefs:
                     for i, (name, val) in enumerate(zip(feature_names, run_coefs)):
                         if name not in cord_freq:
                             cord_freq[name] = []
                         cord_freq[name].append(abs(val))
-    
-    # Calculate mean frequencies
     heel_mean = {name: np.mean(vals) for name, vals in heel_freq.items()}
     cord_mean = {name: np.mean(vals) for name, vals in cord_freq.items()}
-    
-    # Find common biomarkers
     common_biomarkers = set(heel_mean.keys()) & set(cord_mean.keys())
-    
     if not common_biomarkers:
         print(f"No common biomarkers found for {model_type}")
         return
-    
-    # Create DataFrame for plotting
     plot_data = []
     for biomarker in common_biomarkers:
         plot_data.append({
@@ -922,76 +912,140 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
             'Heel_Frequency': heel_mean[biomarker],
             'Cord_Frequency': cord_mean[biomarker]
         })
-    
     df = pd.DataFrame(plot_data)
-    
-    # Sort by total frequency (heel + cord)
     df['Total_Frequency'] = df['Heel_Frequency'] + df['Cord_Frequency']
     df = df.sort_values('Total_Frequency', ascending=False)
-    
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(12, 10))
-    
-    # Create color gradient based on total frequency
+
+    # A. Increase figure size
+    fig, ax = plt.subplots(figsize=(18, 14))
+
     scatter = ax.scatter(df['Heel_Frequency'], df['Cord_Frequency'], 
                         c=df['Total_Frequency'], cmap='viridis', s=60, alpha=0.7, 
                         edgecolors='black', linewidth=0.5, zorder=3)
-    
-    # Add colorbar
     cbar = plt.colorbar(scatter, ax=ax, shrink=0.8, aspect=20)
     cbar.set_label('Total Frequency (Heel + Cord)', fontsize=12, fontweight='bold')
     cbar.ax.tick_params(labelsize=10)
-    
-    # Highlight top 10 biomarkers with larger markers and labels
-    top_10 = df.head(10)
-    ax.scatter(top_10['Heel_Frequency'], top_10['Cord_Frequency'],
-               c=top_10['Total_Frequency'], cmap='viridis', s=120, alpha=0.9, 
-               edgecolors='red', linewidth=2, zorder=5, label='Top 10 biomarkers')
-    
-    # Add labels for top 10 biomarkers
-    for _, row in top_10.iterrows():
-        ax.annotate(row['Biomarker'], 
-                   (row['Heel_Frequency'], row['Cord_Frequency']),
-                   xytext=(5, 5), textcoords='offset points',
-                   fontsize=10, fontweight='bold', alpha=0.9,
-                   bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
-    
-    # Add diagonal line for equal frequency
+
+    threshold = 0.5
+    high_freq = df[df['Total_Frequency'] > threshold]
+    ax.scatter(high_freq['Heel_Frequency'], high_freq['Cord_Frequency'],
+               c=high_freq['Total_Frequency'], cmap='viridis', s=120, alpha=0.9, 
+               edgecolors='red', linewidth=2, zorder=5, label=f'Frequency > {threshold*100:.0f}%')
+
+    # D. Label only the top N biomarkers by total frequency, or all above threshold if top_n is None
+    if top_n is not None:
+        to_label = high_freq.head(top_n)
+    else:
+        to_label = high_freq
+
+    # B. Clean, publication-style labeling (no box, no arrow, small font, minimal offset)
+    texts = []
+    print("Using updated clean label style for biomarker frequency plot (labels should be red)")
+    for _, row in to_label.iterrows():
+        texts.append(
+            ax.annotate(
+                row['Biomarker'],
+                (row['Heel_Frequency'], row['Cord_Frequency']),
+                xytext=(2, 2), textcoords='offset points',
+                fontsize=8, color='red', alpha=0.9,
+                ha='left', va='bottom'
+            )
+        )
+    # Optionally use adjustText for gentle nudge
+    from adjustText import adjust_text
+    adjust_text(
+        texts, ax=ax, force_text=0.01, force_points=0.01, lim=100
+    )
+
     max_val = max(df['Heel_Frequency'].max(), df['Cord_Frequency'].max())
     ax.plot([0, max_val], [0, max_val], '--', color='red', alpha=0.8, linewidth=2, 
             label='Equal frequency line')
-    
-    # Add quadrant lines for better interpretation
     mid_val = max_val / 2
     ax.axhline(y=mid_val, color='gray', linestyle=':', alpha=0.5, linewidth=1)
     ax.axvline(x=mid_val, color='gray', linestyle=':', alpha=0.5, linewidth=1)
-    
-    # Customize plot
     ax.set_xlabel('Biomarker Frequency (Heel)', fontsize=14, fontweight='bold')
     ax.set_ylabel('Biomarker Frequency (Cord)', fontsize=14, fontweight='bold')
-    
-    # Create descriptive title with target type
     target_title = target_type.replace('_', ' ').title()
     ax.set_title(f'Biomarker Frequency Comparison: Heel vs Cord\n{model_type.upper()} Regression - {target_title}', 
                 fontsize=16, fontweight='bold', pad=20)
-    
-    # Add legend
     ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
-    
-    # Add grid for better readability
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    
-    # Set axis limits
     ax.set_xlim(0, max_val * 1.05)
     ax.set_ylim(0, max_val * 1.05)
-    
-    # Add correlation coefficient
     correlation = df['Heel_Frequency'].corr(df['Cord_Frequency'])
     ax.text(0.05, 0.95, f'Correlation: {correlation:.3f}', transform=ax.transAxes, 
             fontsize=12, fontweight='bold',
             bbox=dict(boxstyle="round,pad=0.3", facecolor='lightblue', alpha=0.7),
             verticalalignment='top')
-    
     plt.tight_layout()
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_summary_auc_combined_heel_cord(heel_df, cord_df, filename="outputs/plots/summary_auc_by_dataset_and_model_combined_heel_cord.png", model_type_label="Lasso", metric_label="AUC"):
+    """
+    Create a combined summary plot showing AUC by dataset (Heel, Cord) and model type.
+    Args:
+        heel_df (pd.DataFrame): Summary stats for heel_all
+        cord_df (pd.DataFrame): Summary stats for cord_all
+        filename (str): Output file path
+        model_type_label (str): Label for the x-axis (e.g., 'Lasso', 'ElasticNet')
+        metric_label (str): Metric to plot (default 'AUC')
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    # Add a column to distinguish datasets
+    heel_df = heel_df.copy()
+    cord_df = cord_df.copy()
+    heel_df['Dataset'] = 'Heel'
+    cord_df['Dataset'] = 'Cord'
+    plot_df = pd.concat([heel_df, cord_df], ignore_index=True)
+    # Only keep relevant columns
+    models = ['Clinical', 'Biomarker', 'Combined']
+    colors = {
+        'Clinical': '#2E86AB',    # Blue
+        'Biomarker': '#A23B72',   # Purple  
+        'Combined': '#F18F01',    # Orange
+    }
+    datasets = ['Heel', 'Cord']
+    n_datasets = len(datasets)
+    n_models = len(models)
+    x = np.arange(n_datasets)
+    width = 0.25
+    fig, ax = plt.subplots(figsize=(12, 8))
+    for i, model in enumerate(models):
+        auc_vals = []
+        auc_errs = []
+        for dataset in datasets:
+            row = plot_df[(plot_df['Dataset'] == dataset) & (plot_df['Model'] == model)]
+            if not row.empty and not np.isnan(row[metric_label].values[0]):
+                auc = row[metric_label].values[0]
+                lower = row[f'{metric_label}_CI_Lower'].values[0]
+                upper = row[f'{metric_label}_CI_Upper'].values[0]
+                auc_vals.append(auc)
+                auc_errs.append([[auc - lower], [upper - auc]])
+            else:
+                auc_vals.append(np.nan)
+                auc_errs.append([[0], [0]])
+        positions = x + (i - (n_models-1)/2) * width
+        bars = ax.bar(positions, auc_vals, width, label=model, color=colors[model], 
+                     yerr=np.array(auc_errs).squeeze().T, capsize=5, alpha=0.8, edgecolor='black', linewidth=1)
+        for bar, value in zip(bars, auc_vals):
+            if not np.isnan(value):
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + 0.01, 
+                       f'{value:.3f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+    ax.set_xlabel('Dataset', fontsize=14, fontweight='bold')
+    ax.set_ylabel(f'{metric_label} (with CI)', fontsize=14, fontweight='bold')
+    ax.set_title(f'{metric_label} by Dataset and Model Type - {model_type_label} (heel_all vs cord_all)', fontsize=16, fontweight='bold', pad=20)
+    ax.set_xticks(x)
+    ax.set_xticklabels([d.title() for d in datasets], fontsize=12)
+    ax.legend(title='Model Type', title_fontsize=13, fontsize=12, loc='upper right', framealpha=0.9)
+    ax.grid(axis='y', alpha=0.3, linestyle='-', linewidth=0.5)
+    if metric_label == 'AUC':
+        ax.set_ylim(0, 1.1)
+        ax.axhline(y=0.5, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Random Classifier (AUC = 0.5)')
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.85)
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()

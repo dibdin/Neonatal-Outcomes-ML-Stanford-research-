@@ -965,9 +965,14 @@ def main(target_type='gestational_age'):
     
     # Save all_results for inspection
     import pickle
-    with open("all_results.pkl", "wb") as f:
-        pickle.dump(all_results, f)
-    print("Saved all_results.pkl for coefficient inspection")
+    if target_type == 'gestational_age':
+        with open("all_results_gestational_age.pkl", "wb") as f:
+            pickle.dump(all_results, f)
+        print("Saved all_results_gestational_age.pkl for coefficient inspection")
+    elif target_type == 'birth_weight':
+        with open("all_results_birth_weight.pkl", "wb") as f:
+            pickle.dump(all_results, f)
+        print("Saved all_results_birth_weight.pkl for coefficient inspection")
 
 
 if __name__ == "__main__":

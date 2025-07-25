@@ -37,73 +37,60 @@ def create_directory_structure():
 def organize_plots():
     """Organize plots into the appropriate directories."""
     
-    # Define plot patterns and their target directories
-    plot_patterns = {
-        # Performance metrics plots
-        'outputs/plots/*_metrics_with_ci_*.png': {
-            'gestational_age': 'outputs/plots/gestational_age/performance_metrics/',
-            'birth_weight': 'outputs/plots/birth_weight/performance_metrics/'
-        },
-        
-        # ROC curves
-        'outputs/plots/*_roc_curve_*.png': {
-            'preterm': 'outputs/plots/gestational_age/roc_curves/',
-            'sga': 'outputs/plots/birth_weight/roc_curves/'
-        },
-        
-        # Scatter plots
-        'outputs/plots/true_vs_predicted_scatter_*.png': {
-            'gestational_age': 'outputs/plots/gestational_age/scatter_plots/',
-            'birth_weight': 'outputs/plots/birth_weight/scatter_plots/'
-        },
-        
-        # Biomarker frequency plots
-        'outputs/plots/best_model_biomarker_frequency_*.png': {
-            'gestational_age': 'outputs/plots/gestational_age/biomarker_frequency/',
-            'birth_weight': 'outputs/plots/birth_weight/biomarker_frequency/',
-            'preterm_classification': 'outputs/plots/gestational_age/biomarker_frequency/',
-            'sga_classification': 'outputs/plots/birth_weight/biomarker_frequency/'
-        },
-        
-        # Summary plots
-        'outputs/plots/summary_*_*.png': {
-            'gestational_age': 'outputs/plots/gestational_age/summary_plots/',
-            'birth_weight': 'outputs/plots/birth_weight/summary_plots/'
-        },
-        
-        # Heel vs Cord comparison plots
-        'outputs/plots/biomarker_frequency_heel_vs_cord_*.png': {
-            'gestational_age': 'outputs/plots/gestational_age/biomarker_frequency_cordvsheel/',
-            'birth_weight': 'outputs/plots/birth_weight/biomarker_frequency_cordvsheel/'
-        }
-    }
-    
+    base_dir = "outputs/plots/"
+    # Map keywords to subfolders
+    folder_map = [
+        # Gestational Age
+        ("gestational_age", "gestational_age"),
+        ("preterm_classification", "gestational_age"),
+        # Birth Weight
+        ("birth_weight", "birth_weight"),
+        ("sga_classification", "birth_weight"),
+    ]
+    plot_types = [
+        ("performance_metrics", ["metrics_with_ci"]),
+        ("roc_curves", ["roc_curve"]),
+        ("scatter_plots", ["true_vs_predicted_scatter"]),
+        ("biomarker_frequency_cordvsheel", ["heel_vs_cord_biomarker_frequency"]),
+        ("biomarker_frequency", ["biomarker_frequency"]),
+        ("summary_plots", ["summary_"])
+    ]
     moved_count = 0
-    
-    for pattern, target_mapping in plot_patterns.items():
-        files = glob.glob(pattern)
-        
-        for file_path in files:
-            filename = os.path.basename(file_path)
-            
-            # Determine target directory based on filename
-            target_dir = None
-            
-            for key, target in target_mapping.items():
-                if key in filename:
-                    target_dir = target
-                    break
-            
-            if target_dir:
-                try:
-                    shutil.move(file_path, os.path.join(target_dir, filename))
-                    moved_count += 1
-                    print(f"✅ Moved: {filename} → {target_dir}")
-                except Exception as e:
-                    print(f"❌ Error moving {filename}: {e}")
-            else:
-                print(f"⚠️  No target found for: {filename}")
-    
+    files = [f for f in os.listdir(base_dir) if os.path.isfile(os.path.join(base_dir, f)) and f != "README.md"]
+    for filename in files:
+        target_main = None
+        for key, folder in folder_map:
+            if key in filename:
+                target_main = folder
+                break
+        target_type = None
+        for plot_folder, type_keys in plot_types:
+            if any(tk in filename for tk in type_keys):
+                # Special case: biomarker_frequency_cordvsheel must match only if 'heel_vs_cord' in name
+                if plot_folder == "biomarker_frequency_cordvsheel" and "heel_vs_cord" not in filename:
+                    continue
+                # Special case: biomarker_frequency should not match 'heel_vs_cord'
+                if plot_folder == "biomarker_frequency" and "heel_vs_cord" in filename:
+                    continue
+                target_type = plot_folder
+                break
+        if target_main and target_type:
+            target_dir = os.path.join(base_dir, target_main, target_type)
+        elif target_main:
+            target_dir = os.path.join(base_dir, target_main, "other")
+        else:
+            target_dir = os.path.join(base_dir, "other")
+        os.makedirs(target_dir, exist_ok=True)
+        src = os.path.join(base_dir, filename)
+        dst = os.path.join(target_dir, filename)
+        try:
+            if os.path.exists(dst):
+                os.remove(dst)
+            shutil.move(src, dst)
+            moved_count += 1
+            print(f"✅ Moved: {filename} → {target_dir}")
+        except Exception as e:
+            print(f"❌ Error moving {filename}: {e}")
     print(f"\n🎉 Organization complete! Moved {moved_count} files.")
 
 def create_readme():

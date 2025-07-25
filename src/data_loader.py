@@ -94,6 +94,23 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     if dropna:
         data_df = data_df.dropna(axis=0, how='any')
 
+    # --- FILTER OUT INVALID BIRTH WEIGHT ROWS ---
+    if 'birth_weight_kg' in data_df.columns:
+        # Remove rows with birth_weight_kg == 99.9 or <0.5 or >6 kg
+        invalid_bw = (data_df['birth_weight_kg'] == 99.9) | (data_df['birth_weight_kg'] < 0.5) | (data_df['birth_weight_kg'] > 6)
+        if invalid_bw.any():
+            print(f"Filtering out {invalid_bw.sum()} rows with invalid birth_weight_kg values.")
+            data_df = data_df[~invalid_bw]
+
+    # --- ENSURE REQUIRED COLUMNS ARE PRESENT ---
+    # For gestational age models, ensure birth_weight_kg is in features
+    # For birth weight models, ensure gestational_age_weeks is in features
+    if model_type in ['clinical', 'combined']:
+        if target_type == 'gestational_age' and 'birth_weight_kg' not in data_df.columns:
+            raise ValueError('birth_weight_kg must be present in the data for gestational age models.')
+        if target_type == 'birth_weight' and 'gestational_age_weeks' not in data_df.columns:
+            raise ValueError('gestational_age_weeks must be present in the data for birth weight models.')
+
     # Define feature columns based on model type
     if model_type == 'clinical':
         # Clinical/demographic features - adjust based on target_type
@@ -197,6 +214,10 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     imputer = SimpleImputer(strategy="mean")
     X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
 
+    # --- STANDARDIZE FEATURES ---
+    scaler = StandardScaler()
+    X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns, index=X.index)
+
     # Handle missing values in target variable
     if y.isna().any():
         print(f"Warning: Found {y.isna().sum()} missing values in target variable. Dropping these samples.")
@@ -206,11 +227,6 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         y = y[valid_indices]
         if return_dataframe:
             data_df = data_df[valid_indices]
-
-    # REMOVE SCALING FROM HERE
-    # scaler = StandardScaler()
-    # X_scaled = scaler.fit_transform(X)
-    # X = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
 
     if return_dataframe:
         return X, y, data_df
