@@ -604,7 +604,23 @@ def main(target_type='gestational_age'):
         print(f"\n{'#'*80}")
         print(f"RUNNING DATA OPTION {data_option}: {data_option_label}")
         print(f"{'#'*80}")
-        for dataset_type in dataset_types:
+        
+        # Determine which dataset types to use based on data option
+        if data_option == 1:
+            # Option 1: Use both heel and cord datasets (patients with both samples)
+            current_dataset_types = ['heel', 'cord']
+        elif data_option == 2:
+            # Option 2: Use only heel dataset (all heel samples)
+            current_dataset_types = ['heel']
+        elif data_option == 3:
+            # Option 3: Use only cord dataset (all cord samples)
+            current_dataset_types = ['cord']
+        else:
+            raise ValueError(f"Invalid data_option: {data_option}")
+        
+        print(f"📊 Using dataset types: {current_dataset_types}")
+        
+        for dataset_type in current_dataset_types:
             print(f"\n{'='*80}")
             print(f"TRAINING ON {dataset_type.upper()} DATASET [{data_option_label}]")
             print(f"{'='*80}")
