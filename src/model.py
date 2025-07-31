@@ -77,8 +77,9 @@ def get_model(model_type):
             ('imputer', KNNImputer(n_neighbors=5, weights='uniform')),
             ('scaler', StandardScaler()),
             ('elasticnet', ElasticNet(
-                max_iter=5000,  # Increased for convergence
+                max_iter=10000,  # Increased for better convergence
                 fit_intercept=True,  # Explicitly set
+                tol=1e-4,  # Relaxed tolerance for better convergence
                 random_state=random_state
             ))
         ])
@@ -103,8 +104,9 @@ def get_model(model_type):
             ('imputer', KNNImputer(n_neighbors=5, weights='uniform')),
             ('scaler', StandardScaler()),
             ('lasso', Lasso(
-                max_iter=5000,  # Increased for convergence
+                max_iter=10000,  # Increased for better convergence
                 fit_intercept=True,  # Explicitly set
+                tol=1e-4,  # Relaxed tolerance for better convergence
                 random_state=random_state
             ))
         ])
@@ -175,8 +177,9 @@ def get_classification_model(model_type):
             ('logisticregression', LogisticRegression(
                 penalty="elasticnet",
                 solver="saga",
-                max_iter=5000,  # Increased for convergence
+                max_iter=10000,  # Increased for better convergence
                 fit_intercept=True,  # Explicitly set
+                tol=1e-4,  # Relaxed tolerance for better convergence
                 class_weight="balanced",  # Handle class imbalance
                 random_state=42
             ))
@@ -215,8 +218,9 @@ def get_classification_model(model_type):
             ('logisticregression', LogisticRegression(
                 penalty="l1",
                 solver="saga",
-                max_iter=5000,  # Increased for convergence
+                max_iter=10000,  # Increased for better convergence
                 fit_intercept=True,  # Explicitly set
+                tol=1e-4,  # Relaxed tolerance for better convergence
                 class_weight="balanced",  # Handle class imbalance
                 random_state=42
             ))

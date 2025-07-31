@@ -41,8 +41,9 @@ def test_elasticnet_cv():
         cv=3,
         l1_ratio=[0.1, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99, 1.0],
         random_state=42,
-        max_iter=5000,
+        max_iter=10000,  # Increased for better convergence
         fit_intercept=True,
+        tol=1e-4,  # Relaxed tolerance for better convergence
         n_jobs=-1
     )
     
