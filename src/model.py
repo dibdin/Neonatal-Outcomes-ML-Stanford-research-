@@ -20,9 +20,10 @@ from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
+from sklearn.impute import KNNImputer
 from sklearn.base import clone
 from sklearn.linear_model import ElasticNet, Lasso, LogisticRegression
-from sklearn.model_selection import GridSearchCV, cross_val_score
+from sklearn.model_selection import GridSearchCV, cross_val_score, StratifiedKFold
 import numpy as np
 
 # Global configuration
@@ -51,9 +52,9 @@ def get_model(model_type):
         base_estimator = clone(lasso)
         stabl = Stabl(
             base_estimator=base_estimator,
-            lambda_grid="auto",
+            lambda_grid="[0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]",
             n_lambda=10,
-            artificial_type="knockoff",
+            artificial_type="random_permutation",
             artificial_proportion=1,
             n_bootstraps=500,
             random_state=random_state,
@@ -67,29 +68,51 @@ def get_model(model_type):
     elif model_type == "elasticnet_cv":
         # Elastic Net with cross-validation for optimal alpha and l1_ratio
         param_grid = {
-            'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0],
-            'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9, 1.0]  # 1.0 is equivalent to Lasso
+            'elasticnet__alpha': [0.001, 0.01, 0.1, 1.0, 10.0],
+            'elasticnet__l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9]  # Expanded grid
         }
-        elasticnet = ElasticNet(max_iter=2000, random_state=random_state)
+        
+        # Create pipeline with preprocessing
+        pipeline = Pipeline([
+            ('imputer', KNNImputer(n_neighbors=5, weights='uniform')),
+            ('scaler', StandardScaler()),
+            ('elasticnet', ElasticNet(
+                max_iter=5000,  # Increased for convergence
+                fit_intercept=True,  # Explicitly set
+                random_state=random_state
+            ))
+        ])
+        
         cv_model = GridSearchCV(
-            elasticnet, 
+            pipeline, 
             param_grid, 
-            cv=5, 
+            cv=5,  # Increased for more robust CV
             scoring='neg_mean_squared_error',
             n_jobs=-1,
             verbose=0
         )
         return cv_model, None
     elif model_type == "lasso_cv":
-        # Lasso with cross-validation for optimal alpha
+        # Lasso with cross-validation for optimal alpha, l1_ratio implicitly set at 1.0
         param_grid = {
-            'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]
+            'lasso__alpha': [0.001, 0.01, 0.1, 1.0, 10.0]
         }
-        lasso = Lasso(max_iter=2000, random_state=random_state)
+        
+        # Create pipeline with preprocessing
+        pipeline = Pipeline([
+            ('imputer', KNNImputer(n_neighbors=5, weights='uniform')),
+            ('scaler', StandardScaler()),
+            ('lasso', Lasso(
+                max_iter=5000,  # Increased for convergence
+                fit_intercept=True,  # Explicitly set
+                random_state=random_state
+            ))
+        ])
+        
         cv_model = GridSearchCV(
-            lasso, 
+            pipeline, 
             param_grid, 
-            cv=5, 
+            cv=5,  # Increased for more robust CV
             scoring='neg_mean_squared_error',
             n_jobs=-1,
             verbose=0
@@ -118,12 +141,13 @@ def get_classification_model(model_type):
         )
         model = Stabl(
             base_estimator=clone(logit_lasso),
-            lambda_grid="auto",
+            lambda_grid="[0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]",
             n_lambda=10,
-            fdr_threshold_range=np.array([0.3]),
-            n_bootstraps=2000,
+            n_bootstraps=500,
             random_state=random_state,
             verbose=1,
+            artificial_type="random_permutation",
+            artificial_proportion=1,
         )
         return model, logit_lasso
     elif model_type == "elasticnet":
@@ -136,15 +160,77 @@ def get_classification_model(model_type):
             random_state=42
         )
         return model, None
+    elif model_type == "elasticnet_cv":
+        # Use LogisticRegression with elasticnet penalty and CV
+        # Log-scale grid for C to avoid clustering, with finer granularity around 0.1-1.0
+        param_grid = {
+            'logisticregression__C': [0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0],
+            'logisticregression__l1_ratio': [0.3, 0.5, 0.7, 0.9]  # Exclude 1.0 as that's for lasso
+        }
+        
+        # Create pipeline with preprocessing
+        pipeline = Pipeline([
+            ('imputer', KNNImputer(n_neighbors=5, weights='uniform')),
+            ('scaler', StandardScaler()),
+            ('logisticregression', LogisticRegression(
+                penalty="elasticnet",
+                solver="saga",
+                max_iter=5000,  # Increased for convergence
+                fit_intercept=True,  # Explicitly set
+                class_weight="balanced",  # Handle class imbalance
+                random_state=42
+            ))
+        ])
+        
+        cv_model = GridSearchCV(
+            pipeline,
+            param_grid,
+            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),  # Increased CV folds
+            scoring='roc_auc',
+            n_jobs=-1,
+            verbose=0
+        )
+        return cv_model, None
     elif model_type == "lasso":
         # Use LogisticRegression with L1 penalty
         model = LogisticRegression(
             penalty="l1",
             solver="saga",
             max_iter=2000,
+            class_weight="balanced",
             random_state=42
         )
         return model, None
+    elif model_type == "lasso_cv":
+        # Use LogisticRegression with L1 penalty and CV, l1_ratio is implicitly set at 1.0
+        # Log-scale grid for C to avoid clustering, with finer granularity around 0.1-1.0
+        param_grid = {
+            'logisticregression__C': [0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0]
+        }
+        
+        # Create pipeline with preprocessing
+        pipeline = Pipeline([
+            ('imputer', KNNImputer(n_neighbors=5, weights='uniform')),
+            ('scaler', StandardScaler()),
+            ('logisticregression', LogisticRegression(
+                penalty="l1",
+                solver="saga",
+                max_iter=5000,  # Increased for convergence
+                fit_intercept=True,  # Explicitly set
+                class_weight="balanced",  # Handle class imbalance
+                random_state=42
+            ))
+        ])
+        
+        cv_model = GridSearchCV(
+            pipeline, 
+            param_grid, 
+            cv=5,  # Increased CV folds
+            scoring='roc_auc',
+            n_jobs=-1,
+            verbose=0
+        )
+        return cv_model, None
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 

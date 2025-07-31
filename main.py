@@ -101,13 +101,6 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 # Convert back to DataFrame for compatibility
                 X_train_scaled = pd.DataFrame(X_train_processed, columns=X_train.columns[preprocessing.named_steps['variance_threshold'].get_support()][preprocessing.named_steps['low_info_filter'].get_support()], index=X_train.index)
                 X_test_scaled = pd.DataFrame(X_test_processed, columns=X_train_scaled.columns, index=X_test.index)
-            else:
-                scaler = StandardScaler()
-                X_train_scaled = scaler.fit_transform(X_train)
-                X_test_scaled = scaler.transform(X_test)
-                X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
-                X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
-            
             # Get and train model
             model, base_estimator = get_model(model_type)
             if model_type == 'stabl':
@@ -144,12 +137,51 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                     print(f"[STABL] Base estimator coefficients: {base_estimator.coef_}")
                 y_preds = predict_model(model, X_test_scaled, base_estimator)
             else:
-                trained_model, _, selected_feature_names = train_model(X_train_scaled, y_train, model, None)
-                y_preds = predict_model(trained_model, X_test_scaled, None)
+                # For CV models, preprocessing is handled in the pipeline
+                # For non-CV models, apply preprocessing manually
+                if model_type in ['lasso_cv', 'elasticnet_cv']:
+                    # Pipeline handles preprocessing automatically
+                    trained_model, _, selected_feature_names = train_model(X_train, y_train, model, None)
+                    y_preds = predict_model(trained_model, X_test, None)
+                else:
+                    # Manual preprocessing for non-pipeline models
+                    scaler = StandardScaler()
+                    X_train_scaled = scaler.fit_transform(X_train)
+                    X_test_scaled = scaler.transform(X_test)
+                    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
+                    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
+                    trained_model, _, selected_feature_names = train_model(X_train_scaled, y_train, model, None)
+                    y_preds = predict_model(trained_model, X_test_scaled, None)
             
             # Calculate regression metrics
             mae = mean_absolute_error(y_test, y_preds)
             rmse = np.sqrt(mean_squared_error(y_test, y_preds))
+            
+            # Extract optimized hyperparameters for CV models
+            optimized_alpha = None
+            optimized_l1_ratio = None
+            if model_type in ['lasso_cv', 'elasticnet_cv']:
+                if hasattr(trained_model, 'best_params_'):
+                    # DEBUG: Print the full best_params_ to see what's actually there
+                    print(f"    DEBUG - Full best_params_: {trained_model.best_params_}")
+                    # Extract from pipeline structure
+                    if model_type == 'lasso_cv':
+                        optimized_alpha = trained_model.best_params_.get('lasso__alpha')
+                    elif model_type == 'elasticnet_cv':
+                        optimized_alpha = trained_model.best_params_.get('elasticnet__alpha')
+                        optimized_l1_ratio = trained_model.best_params_.get('elasticnet__l1_ratio')
+                    print(f"    Optimized hyperparameters - Alpha: {optimized_alpha}, L1_ratio: {optimized_l1_ratio}")
+                    # DEBUG: Check if alpha is exactly 0.0 and if it's in the grid
+                    if optimized_alpha == 0.0:
+                        print(f"    ⚠️  WARNING: Alpha=0.0 detected! This should not be in the grid.")
+                        print(f"    DEBUG - Grid alpha values: [0.001, 0.01, 0.1, 1.0, 10.0]")
+                elif hasattr(trained_model, 'best_estimator_'):
+                    # For LogisticRegression, alpha is inverse of C
+                    if hasattr(trained_model.best_estimator_, 'C'):
+                        optimized_alpha = 1.0 / trained_model.best_estimator_.C
+                    if hasattr(trained_model.best_estimator_, 'l1_ratio'):
+                        optimized_l1_ratio = trained_model.best_estimator_.l1_ratio
+                    print(f"    Optimized hyperparameters - Alpha (1/C): {optimized_alpha}, L1_ratio: {optimized_l1_ratio}")
             
             # Store regression results
             maes.append(mae)
@@ -160,7 +192,9 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 'true': y_test.values,
                 'pred': y_preds,
                 'mae': mae,
-                'rmse': rmse
+                'rmse': rmse,
+                'optimized_alpha': optimized_alpha,
+                'optimized_l1_ratio': optimized_l1_ratio
             })
             
             # Save regression model outputs per run
@@ -199,8 +233,8 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
             save_all_as_pickle(model_outputs, filename)
             
             # --- CLASSIFICATION TASK (Preterm vs Term or SGA vs Normal) ---
-            # Only run classification for lasso and elasticnet
-            if model_type in ['lasso', 'elasticnet']:
+            # Only run classification for lasso and elasticnet (including CV versions)
+            if model_type in ['lasso_cv', 'elasticnet_cv']:
                 # Create binary classification targets based on target_type
                 if target_type == 'gestational_age':
                     # Original: Preterm vs Term classification
@@ -277,6 +311,27 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 from src.metrics import compute_auc
                 auc = compute_auc(y_test_binary, y_class_preds)
                 
+                # Extract optimized hyperparameters for CV classification models
+                class_optimized_alpha = None
+                class_optimized_l1_ratio = None
+                if model_type in ['lasso_cv', 'elasticnet_cv']:
+                    if hasattr(trained_class_model, 'best_params_'):
+                        # DEBUG: Print the full best_params_ to see what's actually there
+                        print(f"    DEBUG - Full best_params_: {trained_class_model.best_params_}")
+                        class_optimized_alpha = trained_class_model.best_params_.get('C')
+                        class_optimized_l1_ratio = trained_class_model.best_params_.get('l1_ratio')
+                        print(f"    Classification optimized hyperparameters - C: {class_optimized_alpha}, L1_ratio: {class_optimized_l1_ratio}")
+                        # DEBUG: Check if C is exactly 0.0 and if it's in the grid
+                        if class_optimized_alpha == 0.0:
+                            print(f"    ⚠️  WARNING: C=0.0 detected! This should not be in the grid.")
+                            print(f"    DEBUG - Grid C values: [0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0]")
+                    elif hasattr(trained_class_model, 'best_estimator_'):
+                        if hasattr(trained_class_model.best_estimator_, 'C'):
+                            class_optimized_alpha = trained_class_model.best_estimator_.C
+                        if hasattr(trained_class_model.best_estimator_, 'l1_ratio'):
+                            class_optimized_l1_ratio = trained_class_model.best_estimator_.l1_ratio
+                        print(f"    Classification optimized hyperparameters - C: {class_optimized_alpha}, L1_ratio: {class_optimized_l1_ratio}")
+                
                 # Store classification results
                 aucs.append(auc)
                 
@@ -284,7 +339,9 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 run_classification_predictions.append({
                     'true': y_test_binary if isinstance(y_test_binary, np.ndarray) else y_test_binary.values,
                     'pred': y_class_preds,
-                    'auc': auc
+                    'auc': auc,
+                    'optimized_C': class_optimized_alpha,
+                    'optimized_l1_ratio': class_optimized_l1_ratio
                 })
                 
                 # Collect classification coefficients for frequency plot (biomarker/combined only)
@@ -527,11 +584,11 @@ def main(target_type='gestational_age'):
     """
     # Configuration
     dataset_types = ['heel', 'cord']
-    model_types = ['lasso', 'elasticnet']
+    model_types = ['lasso_cv', 'elasticnet_cv']
     model_configs = [
-        {'name': 'Clinical', 'data_type': 'clinical', 'allowed_models': ['lasso', 'elasticnet']},
-        {'name': 'Biomarker', 'data_type': 'biomarker', 'allowed_models': ['lasso', 'elasticnet']},
-        {'name': 'Combined', 'data_type': 'combined', 'allowed_models': ['lasso', 'elasticnet']}
+        {'name': 'Clinical', 'data_type': 'clinical', 'allowed_models': ['lasso_cv', 'elasticnet_cv']},
+        {'name': 'Biomarker', 'data_type': 'biomarker', 'allowed_models': ['lasso_cv', 'elasticnet_cv']},
+        {'name': 'Combined', 'data_type': 'combined', 'allowed_models': ['lasso_cv', 'elasticnet_cv']}
     ]
     
     print(f"\n{'='*80}")

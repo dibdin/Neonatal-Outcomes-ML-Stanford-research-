@@ -16,6 +16,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import KNNImputer
 from itertools import combinations
 
 
@@ -199,8 +200,32 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         print(f"Biomarker features: {biomarker_count}")
         print(f"Clinical features (with interactions): {clinical_count}")
 
-    # Handle missing values
-    X = X.dropna(axis=1, how='all')  # Drop columns with all missing values first
+    # Initialize feature drop tracking
+    feature_drops = {
+        'high_missing': [],
+        'low_variance': [],
+        'multicollinearity': [],
+        'perfect_correlation': []
+    }
+    
+    # Handle missing values - Drop features with >99% missing
+    missing_percentages = (X.isnull().sum() / len(X)) * 100
+    high_missing_features = missing_percentages[missing_percentages > 99].index
+    if len(high_missing_features) > 0:
+        print(f"Dropping {len(high_missing_features)} features with >99% missing values: {list(high_missing_features)}")
+        feature_drops['high_missing'] = list(high_missing_features)
+        X = X.drop(columns=high_missing_features)
+    
+    # Drop columns with all missing values
+    X = X.dropna(axis=1, how='all')
+    
+    # Drop features with low variance (< 0.01)
+    feature_variances = X.var()
+    low_var_features = feature_variances[feature_variances < 0.01].index
+    if len(low_var_features) > 0:
+        print(f"Dropping {len(low_var_features)} features with variance < 0.01: {list(low_var_features)}")
+        feature_drops['low_variance'] = list(low_var_features)
+        X = X.drop(columns=low_var_features)
     
     # For clinical features, handle categorical variables
     if model_type in ['clinical', 'combined']:
@@ -210,9 +235,81 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
             if col in X.columns:
                 X[col] = pd.Categorical(X[col]).codes
     
-    # Impute missing values with column-wise mean
-    imputer = SimpleImputer(strategy="mean")
+    # Use KNNImputer instead of IterativeImputer for faster performance
+    from sklearn.impute import KNNImputer
+    imputer = KNNImputer(n_neighbors=5, weights='uniform')
     X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
+    
+    # Handle multicollinearity - Drop one feature from each pair with |correlation| > 0.9
+    corr_matrix = X.corr()
+    high_corr_pairs = []
+    
+    # Find highly correlated feature pairs
+    for i in range(len(corr_matrix.columns)):
+        for j in range(i+1, len(corr_matrix.columns)):
+            corr_val = corr_matrix.iloc[i, j]
+            if abs(corr_val) > 0.9:
+                high_corr_pairs.append({
+                    'feature1': corr_matrix.columns[i],
+                    'feature2': corr_matrix.columns[j],
+                    'correlation': corr_val
+                })
+    
+    # Drop one feature from each highly correlated pair
+    features_to_drop = set()
+    for pair in high_corr_pairs:
+        # Keep the feature with higher variance, drop the other
+        var1 = X[pair['feature1']].var()
+        var2 = X[pair['feature2']].var()
+        if var1 >= var2:
+            features_to_drop.add(pair['feature2'])
+        else:
+            features_to_drop.add(pair['feature1'])
+    
+    if features_to_drop:
+        print(f"Dropping {len(features_to_drop)} features to reduce multicollinearity: {list(features_to_drop)}")
+        feature_drops['multicollinearity'] = list(features_to_drop)
+        X = X.drop(columns=list(features_to_drop))
+    
+    # Step 1: Remove perfectly correlated feature pairs (|r| = 1.0)
+    print("\n=== STEP 1: REMOVING PERFECTLY CORRELATED FEATURES ===")
+    abs_corr = X.corr().abs()
+    np.fill_diagonal(abs_corr.values, 0)
+    perfect_corr = np.where(abs_corr == 1.0)
+    perfect_pairs = [(X.columns[i], X.columns[j]) for i, j in zip(*perfect_corr) if i < j]
+    
+    if perfect_pairs:
+        print(f"Found {len(perfect_pairs)} perfectly correlated feature pairs:")
+        for pair in perfect_pairs:
+            print(f"  {pair[0]} ↔ {pair[1]}: |r| = 1.0")
+        
+        # Drop one feature from each perfect pair (keep the one with higher variance)
+        perfect_features_to_drop = set()
+        for feature1, feature2 in perfect_pairs:
+            var1 = X[feature1].var()
+            var2 = X[feature2].var()
+            if var1 >= var2:
+                perfect_features_to_drop.add(feature2)
+            else:
+                perfect_features_to_drop.add(feature1)
+        
+        if perfect_features_to_drop:
+            print(f"Dropping {len(perfect_features_to_drop)} perfectly correlated features: {list(perfect_features_to_drop)}")
+            feature_drops['perfect_correlation'] = list(perfect_features_to_drop)
+            X = X.drop(columns=list(perfect_features_to_drop))
+    else:
+        print("No perfectly correlated feature pairs found.")
+    
+    # Print comprehensive feature drop summary
+    print("\n=== FEATURE DROP SUMMARY ===")
+    total_dropped = sum(len(features) for features in feature_drops.values())
+    print(f"Total features dropped: {total_dropped}")
+    for drop_type, features in feature_drops.items():
+        if features:
+            print(f"  {drop_type}: {len(features)} features - {features}")
+    
+    print(f"\nFinal dataset shape: {X.shape}")
+    print(f"Features remaining: {X.shape[1]}")
 
     # --- STANDARDIZE FEATURES ---
     scaler = StandardScaler()
