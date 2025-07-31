@@ -38,7 +38,7 @@ def test_elasticnet_cv():
     
     # Use ElasticNetCV with expanded l1_ratio grid
     model = ElasticNetCV(
-        cv=5,
+        cv=3,
         l1_ratio=[0.1, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99, 1.0],
         random_state=42,
         max_iter=5000,
@@ -80,8 +80,8 @@ def test_elasticnet_cv():
     
     # Cross-validated performance
     print(f"\n📈 Cross-validated Performance:")
-    cv_scores = cross_val_score(model, X, y, cv=5, scoring='r2')
-    cv_rmse = cross_val_score(model, X, y, cv=5, scoring='neg_root_mean_squared_error')
+    cv_scores = cross_val_score(model, X, y, cv=3, scoring='r2')
+    cv_rmse = cross_val_score(model, X, y, cv=3, scoring='neg_root_mean_squared_error')
     
     print(f"  R² scores: {cv_scores}")
     print(f"  Mean R²: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")

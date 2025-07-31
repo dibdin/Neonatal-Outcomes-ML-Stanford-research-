@@ -86,7 +86,7 @@ def get_model(model_type):
         cv_model = GridSearchCV(
             pipeline, 
             param_grid, 
-            cv=5,  # Increased for more robust CV
+            cv=3,  # Reduced for faster execution
             scoring='neg_mean_squared_error',
             n_jobs=-1,
             verbose=0
@@ -112,7 +112,7 @@ def get_model(model_type):
         cv_model = GridSearchCV(
             pipeline, 
             param_grid, 
-            cv=5,  # Increased for more robust CV
+            cv=3,  # Reduced for faster execution
             scoring='neg_mean_squared_error',
             n_jobs=-1,
             verbose=0
@@ -225,7 +225,7 @@ def get_classification_model(model_type):
         cv_model = GridSearchCV(
             pipeline, 
             param_grid, 
-            cv=5,  # Increased CV folds
+            cv=3,  # Reduced for faster execution
             scoring='roc_auc',
             n_jobs=-1,
             verbose=0
