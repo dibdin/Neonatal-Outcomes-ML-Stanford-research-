@@ -100,8 +100,11 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         # Remove rows with birth_weight_kg == 99.9 or <0.5 or >6 kg
         invalid_bw = (data_df['birth_weight_kg'] == 99.9) | (data_df['birth_weight_kg'] < 0.5) | (data_df['birth_weight_kg'] > 6)
         if invalid_bw.any():
-            print(f"Filtering out {invalid_bw.sum()} rows with invalid birth_weight_kg values.")
+            print(f"🔍 PREPROCESSING STEP 1: Filtering out {invalid_bw.sum()} rows with invalid birth_weight_kg values.")
+            print(f"   Invalid values found: {data_df.loc[invalid_bw, 'birth_weight_kg'].unique()}")
             data_df = data_df[~invalid_bw]
+        else:
+            print("✅ PREPROCESSING STEP 1: No invalid birth_weight_kg values found.")
 
     # --- ENSURE REQUIRED COLUMNS ARE PRESENT ---
     # For gestational age models, ensure birth_weight_kg is in features
@@ -111,6 +114,7 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
             raise ValueError('birth_weight_kg must be present in the data for gestational age models.')
         if target_type == 'birth_weight' and 'gestational_age_weeks' not in data_df.columns:
             raise ValueError('gestational_age_weeks must be present in the data for birth weight models.')
+        print(f"✅ PREPROCESSING STEP 2: Required columns verified for {target_type} prediction.")
 
     # Define feature columns based on model type
     if model_type == 'clinical':
@@ -122,7 +126,7 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
             # SGA pipeline: gestational_age_weeks, sex, birth_order (replace birth_weight with gestational_age_weeks)
             clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[158]]  # gestational_age_weeks, sex, birth_order
         
-        print(f"Base clinical columns: {clinical_cols}")
+        print(f"🔍 PREPROCESSING STEP 3: Base clinical columns: {clinical_cols}")
         
         # Extract base clinical features
         X_clinical = data_df[clinical_cols].copy()
@@ -134,12 +138,13 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
             X_clinical[interaction_name] = X_clinical[col1] * X_clinical[col2]
             interaction_features.append(interaction_name)
             
-        print(f"Created {len(interaction_features)} pairwise interactions: {interaction_features}")
+        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} pairwise interactions: {interaction_features}")
         feature_cols = clinical_cols + interaction_features
         
     elif model_type == 'biomarker':
         # Biomarker features (columns 30-141)
         feature_cols = df.columns[30:141].tolist()
+        print(f"🔍 PREPROCESSING STEP 3: Selected {len(feature_cols)} biomarker features")
         
     elif model_type == 'combined':
         # Both clinical and biomarker features
@@ -153,6 +158,8 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
             # SGA pipeline: gestational_age_weeks, sex, birth_order
             clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[158]]
         
+        print(f"🔍 PREPROCESSING STEP 3: Selected {len(biomarker_cols)} biomarker features and {len(clinical_cols)} clinical features")
+        
         # Extract base clinical features
         X_clinical = data_df[clinical_cols].copy()
         
@@ -165,6 +172,7 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
             
         clinical_with_interactions = clinical_cols + interaction_features
         feature_cols = biomarker_cols + clinical_with_interactions
+        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} clinical interactions. Total features: {len(feature_cols)}")
 
     # Extract features and labels
     if model_type == 'clinical':
@@ -182,23 +190,25 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         X = pd.concat([X_biomarker, X_clinical], axis=1)
 
     # Print information about the features being included
-    print(f"Data option: {data_option}")
-    print(f"Dataset: {dataset_type}")
-    print(f"Model type: {model_type}")
-    print(f"Target variable: {target_type}")
-    print(f"Number of features included: {len(feature_cols)}")
-    print(f"Number of samples: {len(data_df)}")
+    print(f"\n📊 DATASET SUMMARY:")
+    print(f"   Data option: {data_option}")
+    print(f"   Dataset: {dataset_type}")
+    print(f"   Model type: {model_type}")
+    print(f"   Target variable: {target_type}")
+    print(f"   Initial features: {len(feature_cols)}")
+    print(f"   Initial samples: {len(data_df)}")
+    print(f"   X shape: {X.shape}, y shape: {y.shape}")
     
     if model_type == 'clinical':
-        print(f"Clinical features: {feature_cols}")
+        print(f"   Clinical features: {feature_cols}")
     elif model_type == 'biomarker':
-        print(f"Biomarkers with TREC: {[col for col in feature_cols if 'TREC' in col]}")
-        print(f"Biomarkers with HGB: {[col for col in feature_cols if 'HGB' in col]}")
+        print(f"   Biomarkers with TREC: {[col for col in feature_cols if 'TREC' in col]}")
+        print(f"   Biomarkers with HGB: {[col for col in feature_cols if 'HGB' in col]}")
     elif model_type == 'combined':
         biomarker_count = len(biomarker_cols)
         clinical_count = len(clinical_with_interactions)
-        print(f"Biomarker features: {biomarker_count}")
-        print(f"Clinical features (with interactions): {clinical_count}")
+        print(f"   Biomarker features: {biomarker_count}")
+        print(f"   Clinical features (with interactions): {clinical_count}")
 
     # Initialize feature drop tracking
     feature_drops = {
@@ -208,39 +218,67 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         'perfect_correlation': []
     }
     
+    print(f"\n🔍 PREPROCESSING STEP 5: MISSING VALUE ANALYSIS")
+    print(f"   Initial missing values in X: {X.isnull().sum().sum()}")
+    print(f"   Features with missing values: {X.isnull().sum()[X.isnull().sum() > 0].count()}")
+    
     # Handle missing values - Drop features with >99% missing
     missing_percentages = (X.isnull().sum() / len(X)) * 100
     high_missing_features = missing_percentages[missing_percentages > 99].index
     if len(high_missing_features) > 0:
-        print(f"Dropping {len(high_missing_features)} features with >99% missing values: {list(high_missing_features)}")
+        print(f"❌ PREPROCESSING STEP 6: Dropping {len(high_missing_features)} features with >99% missing values:")
+        for feat in high_missing_features:
+            print(f"   - {feat}: {missing_percentages[feat]:.1f}% missing")
         feature_drops['high_missing'] = list(high_missing_features)
         X = X.drop(columns=high_missing_features)
+    else:
+        print(f"✅ PREPROCESSING STEP 6: No features with >99% missing values found.")
     
     # Drop columns with all missing values
-    X = X.dropna(axis=1, how='all')
+    all_missing_cols = X.columns[X.isnull().all()].tolist()
+    if all_missing_cols:
+        print(f"❌ PREPROCESSING STEP 7: Dropping {len(all_missing_cols)} columns with all missing values: {all_missing_cols}")
+        X = X.drop(columns=all_missing_cols)
+    else:
+        print(f"✅ PREPROCESSING STEP 7: No columns with all missing values found.")
+    
+    print(f"   After missing value cleanup - X shape: {X.shape}")
     
     # Drop features with low variance (< 0.01)
     feature_variances = X.var()
     low_var_features = feature_variances[feature_variances < 0.01].index
     if len(low_var_features) > 0:
-        print(f"Dropping {len(low_var_features)} features with variance < 0.01: {list(low_var_features)}")
+        print(f"❌ PREPROCESSING STEP 8: Dropping {len(low_var_features)} features with variance < 0.01:")
+        for feat in low_var_features:
+            print(f"   - {feat}: variance = {feature_variances[feat]:.6f}")
         feature_drops['low_variance'] = list(low_var_features)
         X = X.drop(columns=low_var_features)
+    else:
+        print(f"✅ PREPROCESSING STEP 8: No features with variance < 0.01 found.")
     
     # For clinical features, handle categorical variables
     if model_type in ['clinical', 'combined']:
         # Convert categorical variables to numeric
         categorical_cols = X.select_dtypes(include=['object']).columns
-        for col in categorical_cols:
-            if col in X.columns:
-                X[col] = pd.Categorical(X[col]).codes
+        if len(categorical_cols) > 0:
+            print(f"🔍 PREPROCESSING STEP 9: Converting {len(categorical_cols)} categorical variables to numeric: {list(categorical_cols)}")
+            for col in categorical_cols:
+                if col in X.columns:
+                    X[col] = pd.Categorical(X[col]).codes
+        else:
+            print(f"✅ PREPROCESSING STEP 9: No categorical variables found.")
+    
+    print(f"   Before imputation - X shape: {X.shape}")
     
     # Use KNNImputer instead of IterativeImputer for faster performance
     from sklearn.impute import KNNImputer
+    print(f"🔍 PREPROCESSING STEP 10: Applying KNNImputer (n_neighbors=5)")
     imputer = KNNImputer(n_neighbors=5, weights='uniform')
     X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
+    print(f"✅ PREPROCESSING STEP 10: Imputation completed. Missing values remaining: {X.isnull().sum().sum()}")
     
     # Handle multicollinearity - Drop one feature from each pair with |correlation| > 0.9
+    print(f"🔍 PREPROCESSING STEP 11: Checking for multicollinearity (|r| > 0.9)")
     corr_matrix = X.corr()
     high_corr_pairs = []
     
@@ -255,33 +293,40 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
                     'correlation': corr_val
                 })
     
-    # Drop one feature from each highly correlated pair
-    features_to_drop = set()
-    for pair in high_corr_pairs:
-        # Keep the feature with higher variance, drop the other
-        var1 = X[pair['feature1']].var()
-        var2 = X[pair['feature2']].var()
-        if var1 >= var2:
-            features_to_drop.add(pair['feature2'])
-        else:
-            features_to_drop.add(pair['feature1'])
-    
-    if features_to_drop:
-        print(f"Dropping {len(features_to_drop)} features to reduce multicollinearity: {list(features_to_drop)}")
-        feature_drops['multicollinearity'] = list(features_to_drop)
-        X = X.drop(columns=list(features_to_drop))
+    if high_corr_pairs:
+        print(f"❌ PREPROCESSING STEP 11: Found {len(high_corr_pairs)} highly correlated feature pairs:")
+        for pair in high_corr_pairs:
+            print(f"   - {pair['feature1']} ↔ {pair['feature2']}: r = {pair['correlation']:.3f}")
+        
+        # Drop one feature from each highly correlated pair
+        features_to_drop = set()
+        for pair in high_corr_pairs:
+            # Keep the feature with higher variance, drop the other
+            var1 = X[pair['feature1']].var()
+            var2 = X[pair['feature2']].var()
+            if var1 >= var2:
+                features_to_drop.add(pair['feature2'])
+            else:
+                features_to_drop.add(pair['feature1'])
+        
+        if features_to_drop:
+            print(f"   Dropping {len(features_to_drop)} features to reduce multicollinearity: {list(features_to_drop)}")
+            feature_drops['multicollinearity'] = list(features_to_drop)
+            X = X.drop(columns=list(features_to_drop))
+    else:
+        print(f"✅ PREPROCESSING STEP 11: No highly correlated feature pairs found.")
     
     # Step 1: Remove perfectly correlated feature pairs (|r| = 1.0)
-    print("\n=== STEP 1: REMOVING PERFECTLY CORRELATED FEATURES ===")
+    print(f"\n🔍 PREPROCESSING STEP 12: Checking for perfectly correlated features (|r| = 1.0)")
     abs_corr = X.corr().abs()
     np.fill_diagonal(abs_corr.values, 0)
     perfect_corr = np.where(abs_corr == 1.0)
     perfect_pairs = [(X.columns[i], X.columns[j]) for i, j in zip(*perfect_corr) if i < j]
     
     if perfect_pairs:
-        print(f"Found {len(perfect_pairs)} perfectly correlated feature pairs:")
+        print(f"❌ PREPROCESSING STEP 12: Found {len(perfect_pairs)} perfectly correlated feature pairs:")
         for pair in perfect_pairs:
-            print(f"  {pair[0]} ↔ {pair[1]}: |r| = 1.0")
+            print(f"   - {pair[0]} ↔ {pair[1]}: |r| = 1.0")
         
         # Drop one feature from each perfect pair (keep the one with higher variance)
         perfect_features_to_drop = set()
@@ -294,36 +339,53 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
                 perfect_features_to_drop.add(feature1)
         
         if perfect_features_to_drop:
-            print(f"Dropping {len(perfect_features_to_drop)} perfectly correlated features: {list(perfect_features_to_drop)}")
+            print(f"   Dropping {len(perfect_features_to_drop)} perfectly correlated features: {list(perfect_features_to_drop)}")
             feature_drops['perfect_correlation'] = list(perfect_features_to_drop)
             X = X.drop(columns=list(perfect_features_to_drop))
     else:
-        print("No perfectly correlated feature pairs found.")
+        print(f"✅ PREPROCESSING STEP 12: No perfectly correlated feature pairs found.")
     
     # Print comprehensive feature drop summary
-    print("\n=== FEATURE DROP SUMMARY ===")
+    print(f"\n📊 FEATURE DROP SUMMARY:")
     total_dropped = sum(len(features) for features in feature_drops.values())
-    print(f"Total features dropped: {total_dropped}")
+    print(f"   Total features dropped: {total_dropped}")
     for drop_type, features in feature_drops.items():
         if features:
-            print(f"  {drop_type}: {len(features)} features - {features}")
+            print(f"   - {drop_type}: {len(features)} features")
+            for feat in features:
+                print(f"     * {feat}")
     
-    print(f"\nFinal dataset shape: {X.shape}")
-    print(f"Features remaining: {X.shape[1]}")
+    print(f"\n✅ FINAL DATASET:")
+    print(f"   Final X shape: {X.shape}")
+    print(f"   Features remaining: {X.shape[1]}")
+    print(f"   Features dropped: {total_dropped}")
+    print(f"   Retention rate: {X.shape[1]/(X.shape[1]+total_dropped)*100:.1f}%")
 
     # --- STANDARDIZE FEATURES ---
+    print(f"\n🔍 PREPROCESSING STEP 13: Applying StandardScaler")
     scaler = StandardScaler()
     X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns, index=X.index)
+    print(f"✅ PREPROCESSING STEP 13: Standardization completed.")
+    print(f"   Feature means after scaling: {X.mean().abs().max():.6f} (should be ~0)")
+    print(f"   Feature stds after scaling: {X.std().mean():.6f} (should be ~1)")
 
     # Handle missing values in target variable
     if y.isna().any():
-        print(f"Warning: Found {y.isna().sum()} missing values in target variable. Dropping these samples.")
+        print(f"⚠️  WARNING: Found {y.isna().sum()} missing values in target variable. Dropping these samples.")
         # Get indices where target is not NaN
         valid_indices = ~y.isna()
         X = X[valid_indices]
         y = y[valid_indices]
         if return_dataframe:
             data_df = data_df[valid_indices]
+        print(f"   After dropping target missing values - X shape: {X.shape}, y shape: {y.shape}")
+    else:
+        print(f"✅ Target variable has no missing values.")
+
+    print(f"\n🎯 PREPROCESSING COMPLETE!")
+    print(f"   Final dataset: X={X.shape}, y={y.shape}")
+    print(f"   Ready for model training.")
+    print(f"   " + "="*50)
 
     if return_dataframe:
         return X, y, data_df
