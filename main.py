@@ -143,6 +143,9 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                     # Pipeline handles preprocessing automatically
                     trained_model, _, selected_feature_names = train_model(X_train, y_train, model, None)
                     y_preds = predict_model(trained_model, X_test, None)
+                    # For CV models, use original data for feature reference
+                    X_train_scaled = X_train
+                    X_test_scaled = X_test
                 else:
                     # Manual preprocessing for non-pipeline models
                     scaler = StandardScaler()
