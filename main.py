@@ -52,7 +52,7 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
         model_name (str): Name of the model (Clinical, Biomarker, Combined)
         data_type (str): Type of data to use (clinical, biomarker, combined)
         dataset_type (str): Dataset type (cord, heel)
-        model_type (str): Model algorithm (lasso, elasticnet, stabl)
+        model_type (str): Model algorithm (lasso_cv, elasticnet_cv, stabl)
         data_option (int): Data loading option (1, 2, or 3)
         data_option_label (str): Label for data option
         target_type (str): Target variable type ('gestational_age' or 'birth_weight')
@@ -222,15 +222,53 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
             
             # Collect coefficients for frequency plot (biomarker/combined only)
             if model_name.lower() in ['biomarker', 'combined']:
-                if hasattr(trained_model, 'coef_') and trained_model.coef_ is not None:
-                    # Ensure full length, pad with zeros if needed
-                    coef = trained_model.coef_
-                    if len(coef) < X_train_scaled.shape[1]:
-                        coef = np.pad(coef, (0, X_train_scaled.shape[1] - len(coef)), 'constant')
-                    all_coefficients.append(coef)
+                # For CV models, extract coefficients from the best estimator
+                if model_type in ['lasso_cv', 'elasticnet_cv']:
+                    if hasattr(trained_model, 'best_estimator_'):
+                        # For CV models, the best_estimator_ is a pipeline
+                        # We need to extract coefficients from the final step (LogisticRegression for classification, Lasso/ElasticNet for regression)
+                        best_estimator = trained_model.best_estimator_
+                        if hasattr(best_estimator, 'named_steps'):
+                            # It's a pipeline - get the final step
+                            final_step_name = list(best_estimator.named_steps.keys())[-1]
+                            final_step = best_estimator.named_steps[final_step_name]
+                            if hasattr(final_step, 'coef_'):
+                                coef = final_step.coef_
+                                print(f"    DEBUG - CV model pipeline final step '{final_step_name}' coefs shape: {coef.shape}")
+                                print(f"    DEBUG - CV model pipeline final step coefs: {coef}")
+                            else:
+                                print(f"    DEBUG - No coef_ found in pipeline final step '{final_step_name}'")
+                                coef = np.zeros(X_train_scaled.shape[1])
+                        else:
+                            # Direct estimator (not pipeline)
+                            if hasattr(best_estimator, 'coef_'):
+                                coef = best_estimator.coef_
+                                print(f"    DEBUG - CV model best estimator coefs shape: {coef.shape}")
+                                print(f"    DEBUG - CV model best estimator coefs: {coef}")
+                            else:
+                                print(f"    DEBUG - No coef_ found in CV model best estimator")
+                                coef = np.zeros(X_train_scaled.shape[1])
+                    else:
+                        print(f"    DEBUG - No best_estimator_ found for CV model")
+                        coef = np.zeros(X_train_scaled.shape[1])
                 else:
-                    all_coefficients.append(np.zeros(X_train_scaled.shape[1]))
-            
+                    # For non-CV models, extract directly from trained_model
+                    if hasattr(trained_model, 'coef_') and trained_model.coef_ is not None:
+                        coef = trained_model.coef_
+                        print(f"    DEBUG - Non-CV model coefs shape: {coef.shape}")
+                        print(f"    DEBUG - Non-CV model coefs: {coef}")
+                    else:
+                        print(f"    DEBUG - No coef_ found for non-CV model")
+                        coef = np.zeros(X_train_scaled.shape[1])
+                
+                # Ensure full length, pad with zeros if needed
+                if len(coef) < X_train_scaled.shape[1]:
+                    coef = np.pad(coef, (0, X_train_scaled.shape[1] - len(coef)), 'constant')
+                    print(f"    DEBUG - Padded coefs shape: {coef.shape}")
+                
+                all_coefficients.append(coef)
+                print(f"    DEBUG - All coefficients length: {len(all_coefficients)}")
+                print(f"    DEBUG - Current coef: {coef}")
             # Save regression model outputs per run
             filename = f"outputs/models/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_run{i + 1}_model_outputs.pkl"
             save_all_as_pickle(model_outputs, filename)
@@ -349,22 +387,53 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 
                 # Collect classification coefficients for frequency plot (biomarker/combined only)
                 if model_name.lower() in ['biomarker', 'combined']:
-                    if hasattr(trained_class_model, 'coef_') and trained_class_model.coef_ is not None:
-                        # For STABL, use the classification-specific feature names and coefficients
-                        if model_type == 'stabl':
-                            class_coef = trained_class_model.coef_
-                            # Pad to match original feature count for consistency
-                            if len(class_coef) < X_train_scaled.shape[1]:
-                                class_coef = np.pad(class_coef, (0, X_train_scaled.shape[1] - len(class_coef)), 'constant')
-                            all_classification_coefficients.append(class_coef)
+                    # For CV classification models, extract coefficients from the best estimator
+                    if model_type in ['lasso_cv', 'elasticnet_cv']:
+                        if hasattr(trained_class_model, 'best_estimator_'):
+                            # For CV models, the best_estimator_ is a pipeline
+                            # We need to extract coefficients from the final step (LogisticRegression)
+                            best_estimator = trained_class_model.best_estimator_
+                            if hasattr(best_estimator, 'named_steps'):
+                                # It's a pipeline - get the final step (LogisticRegression)
+                                final_step_name = list(best_estimator.named_steps.keys())[-1]
+                                final_step = best_estimator.named_steps[final_step_name]
+                                if hasattr(final_step, 'coef_'):
+                                    class_coef = final_step.coef_
+                                    print(f"    DEBUG - CV classification model pipeline final step '{final_step_name}' coefs shape: {class_coef.shape}")
+                                    print(f"    DEBUG - CV classification model pipeline final step coefs: {class_coef}")
+                                else:
+                                    print(f"    DEBUG - No coef_ found in CV classification pipeline final step '{final_step_name}'")
+                                    class_coef = np.zeros(X_train_scaled.shape[1])
+                            else:
+                                # Direct estimator (not pipeline)
+                                if hasattr(best_estimator, 'coef_'):
+                                    class_coef = best_estimator.coef_
+                                    print(f"    DEBUG - CV classification model best estimator coefs shape: {class_coef.shape}")
+                                    print(f"    DEBUG - CV classification model best estimator coefs: {class_coef}")
+                                else:
+                                    print(f"    DEBUG - No coef_ found in CV classification model best estimator")
+                                    class_coef = np.zeros(X_train_scaled.shape[1])
                         else:
-                            # For non-STABL models, use the same approach as regression
-                            class_coef = trained_class_model.coef_
-                            if len(class_coef) < X_train_scaled.shape[1]:
-                                class_coef = np.pad(class_coef, (0, X_train_scaled.shape[1] - len(class_coef)), 'constant')
-                            all_classification_coefficients.append(class_coef)
+                            print(f"    DEBUG - No best_estimator_ found for CV classification model")
+                            class_coef = np.zeros(X_train_scaled.shape[1])
                     else:
-                        all_classification_coefficients.append(np.zeros(X_train_scaled.shape[1]))
+                        # For non-CV models (STABL), extract directly from trained_class_model
+                        if hasattr(trained_class_model, 'coef_') and trained_class_model.coef_ is not None:
+                            class_coef = trained_class_model.coef_
+                            print(f"    DEBUG - Non-CV classification model coefs shape: {class_coef.shape}")
+                            print(f"    DEBUG - Non-CV classification model coefs: {class_coef}")
+                        else:
+                            print(f"    DEBUG - No coef_ found for non-CV classification model")
+                            class_coef = np.zeros(X_train_scaled.shape[1])
+                    
+                    # Ensure full length, pad with zeros if needed
+                    if len(class_coef) < X_train_scaled.shape[1]:
+                        class_coef = np.pad(class_coef, (0, X_train_scaled.shape[1] - len(class_coef)), 'constant')
+                        print(f"    DEBUG - Padded classification coefs shape: {class_coef.shape}")
+                    
+                    all_classification_coefficients.append(class_coef)
+                    print(f"    DEBUG - All classification coefficients length: {len(all_classification_coefficients)}")
+                    print(f"    DEBUG - Current classification coef: {class_coef}")
                 
                 # Save classification model outputs per run
                 if target_type == 'gestational_age':
@@ -697,7 +766,7 @@ def main(target_type='gestational_age'):
     print(summary_df)
     
     # Create separate plots for each model type and data option (including AUC)
-    for model_type in ['lasso', 'elasticnet']:
+    for model_type in ['lasso_cv', 'elasticnet_cv']:
         for data_option in [1, 2, 3]:
             data_option_label = DATA_OPTION_LABELS[data_option]
             
@@ -706,8 +775,8 @@ def main(target_type='gestational_age'):
             if not model_df.empty:
                 # Group by Dataset and Model (feature sets) for this specific model type
                 model_df_grouped = model_df.groupby(["Dataset", "Model"], as_index=False).mean(numeric_only=True)
-                # Capitalize model type for label
-                model_type_label = model_type.capitalize()
+                # Capitalize model type for label (remove _cv suffix)
+                model_type_label = model_type.replace('_cv', '').capitalize()
                 
                 # Create summary plots for this specific data option
                 plot_summary_mae_by_dataset_and_model(
@@ -728,14 +797,14 @@ def main(target_type='gestational_age'):
                 )
     
     # Also create the original aggregated plots for comparison
-    for model_type in ['lasso', 'elasticnet']:
+    for model_type in ['lasso_cv', 'elasticnet_cv']:
         # Filter data for this model type
         model_df = summary_df[summary_df['ModelType'] == model_type].copy()
         if not model_df.empty:
             # Group by Dataset and Model (feature sets) for this specific model type
             model_df_grouped = model_df.groupby(["Dataset", "Model"], as_index=False).mean(numeric_only=True)
-            # Capitalize model type for label
-            model_type_label = model_type.capitalize()
+            # Capitalize model type for label (remove _cv suffix)
+            model_type_label = model_type.replace('_cv', '').capitalize()
             plot_summary_mae_by_dataset_and_model(
                 model_df_grouped, 
                 filename=f"outputs/plots/summary_mae_by_dataset_and_model_{model_type}_{target_type}.png",
@@ -773,9 +842,9 @@ def main(target_type='gestational_age'):
             # Collect predictions from all model types for this dataset and data option
             pred_rows = []
             
-            for model_type in ['lasso', 'elasticnet']:
+            for model_type in ['lasso_cv', 'elasticnet_cv']:
                 for model_name in ['Clinical', 'Biomarker', 'Combined']:
-                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}_{target_type}"
                     
                     if result_key in all_results:
                         result = all_results[result_key]
@@ -810,7 +879,7 @@ def main(target_type='gestational_age'):
                 print(f"Combined scatter plot for {data_option_label} {dataset} saved: true_vs_predicted_scatter_{data_option_label}_{dataset}_{target_type}.png")
     
     # Also create overall combined scatter plots for each model type across all data options
-    for model_type in ['lasso', 'elasticnet']:
+    for model_type in ['lasso_cv', 'elasticnet_cv']:
         # Collect predictions from all data options and datasets for this model type
         pred_rows = []
         
@@ -827,7 +896,7 @@ def main(target_type='gestational_age'):
             
             for dataset in datasets_to_process:
                 for model_name in ['Clinical', 'Biomarker', 'Combined']:
-                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}_{target_type}"
                     
                     if result_key in all_results:
                         result = all_results[result_key]
@@ -875,9 +944,9 @@ def main(target_type='gestational_age'):
             datasets_to_process = ['cord']
         
         for dataset in datasets_to_process:
-            for model_type in ['lasso', 'elasticnet']:
+            for model_type in ['lasso_cv', 'elasticnet_cv']:
                 for model_name in ['Clinical', 'Biomarker', 'Combined']:
-                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}_{target_type}"
                     
                     if result_key in all_results:
                         result = all_results[result_key]
@@ -913,7 +982,7 @@ def main(target_type='gestational_age'):
     # plot_biomarker_frequency_heel_vs_cord(all_results, filename="outputs/plots/biomarker_frequency.png") # This line is removed
 
     # Create biomarker frequency comparison plots (Heel vs Cord) for each model type
-    for model_type in ['lasso', 'elasticnet']:
+    for model_type in ['lasso_cv', 'elasticnet_cv']:
         # Option 1: Heel vs Cord comparison using both_samples data
         option1_results = {k: v for k, v in all_results.items() if 'both_samples' in k}
         if option1_results:
@@ -956,7 +1025,7 @@ def main(target_type='gestational_age'):
         
         for dataset in datasets_to_process:
             # Filter summary_df for biomarker models of this dataset and data option
-            biomarker_df = summary_df[(summary_df['Dataset'] == dataset) & (summary_df['Model'] == 'Biomarker')]
+            biomarker_df = summary_df[(summary_df['Dataset'] == dataset) & (summary_df['Model'] == 'Biomarker') & (summary_df['DataOption'] == data_option_label)]
             if biomarker_df.empty:
                 print(f"No biomarker models found for {dataset} dataset in {data_option_label}.")
                 continue
@@ -966,7 +1035,9 @@ def main(target_type='gestational_age'):
             best_model_type = best_row['ModelType']
             
             # Get the results from all_results dictionary
-            result_key = f"{data_option_label}_{dataset}_{best_model_type}_Biomarker"
+            result_key = f"{data_option_label}_{dataset}_{best_model_type}_Biomarker_{target_type}"
+            print(f"Looking for key: {result_key}")
+            print(f"Available keys: {[k for k in all_results.keys() if 'Biomarker' in k and data_option_label in k and dataset in k]}")
             if result_key not in all_results:
                 print(f"Could not find results for {result_key} in all_results.")
                 continue

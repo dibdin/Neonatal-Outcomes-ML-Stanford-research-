@@ -214,7 +214,6 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     feature_drops = {
         'high_missing': [],
         'low_variance': [],
-        'multicollinearity': [],
         'perfect_correlation': []
     }
     
@@ -277,54 +276,17 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
     print(f"✅ PREPROCESSING STEP 10: Imputation completed. Missing values remaining: {X.isnull().sum().sum()}")
     
-    # Handle multicollinearity - Drop one feature from each pair with |correlation| > 0.9
-    print(f"🔍 PREPROCESSING STEP 11: Checking for multicollinearity (|r| > 0.9)")
-    corr_matrix = X.corr()
-    high_corr_pairs = []
-    
-    # Find highly correlated feature pairs
-    for i in range(len(corr_matrix.columns)):
-        for j in range(i+1, len(corr_matrix.columns)):
-            corr_val = corr_matrix.iloc[i, j]
-            if abs(corr_val) > 0.9:
-                high_corr_pairs.append({
-                    'feature1': corr_matrix.columns[i],
-                    'feature2': corr_matrix.columns[j],
-                    'correlation': corr_val
-                })
-    
-    if high_corr_pairs:
-        print(f"❌ PREPROCESSING STEP 11: Found {len(high_corr_pairs)} highly correlated feature pairs:")
-        for pair in high_corr_pairs:
-            print(f"   - {pair['feature1']} ↔ {pair['feature2']}: r = {pair['correlation']:.3f}")
-        
-        # Drop one feature from each highly correlated pair
-        features_to_drop = set()
-        for pair in high_corr_pairs:
-            # Keep the feature with higher variance, drop the other
-            var1 = X[pair['feature1']].var()
-            var2 = X[pair['feature2']].var()
-            if var1 >= var2:
-                features_to_drop.add(pair['feature2'])
-            else:
-                features_to_drop.add(pair['feature1'])
-        
-        if features_to_drop:
-            print(f"   Dropping {len(features_to_drop)} features to reduce multicollinearity: {list(features_to_drop)}")
-            feature_drops['multicollinearity'] = list(features_to_drop)
-            X = X.drop(columns=list(features_to_drop))
-    else:
-        print(f"✅ PREPROCESSING STEP 11: No highly correlated feature pairs found.")
+
     
     # Step 1: Remove perfectly correlated feature pairs (|r| = 1.0)
-    print(f"\n🔍 PREPROCESSING STEP 12: Checking for perfectly correlated features (|r| = 1.0)")
+    print(f"\n🔍 PREPROCESSING STEP 11: Checking for perfectly correlated features (|r| = 1.0)")
     abs_corr = X.corr().abs()
     np.fill_diagonal(abs_corr.values, 0)
     perfect_corr = np.where(abs_corr == 1.0)
     perfect_pairs = [(X.columns[i], X.columns[j]) for i, j in zip(*perfect_corr) if i < j]
     
     if perfect_pairs:
-        print(f"❌ PREPROCESSING STEP 12: Found {len(perfect_pairs)} perfectly correlated feature pairs:")
+        print(f"❌ PREPROCESSING STEP 11: Found {len(perfect_pairs)} perfectly correlated feature pairs:")
         for pair in perfect_pairs:
             print(f"   - {pair[0]} ↔ {pair[1]}: |r| = 1.0")
         
@@ -343,7 +305,7 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
             feature_drops['perfect_correlation'] = list(perfect_features_to_drop)
             X = X.drop(columns=list(perfect_features_to_drop))
     else:
-        print(f"✅ PREPROCESSING STEP 12: No perfectly correlated feature pairs found.")
+        print(f"✅ PREPROCESSING STEP 11: No perfectly correlated feature pairs found.")
     
     # Print comprehensive feature drop summary
     print(f"\n📊 FEATURE DROP SUMMARY:")
@@ -362,10 +324,10 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     print(f"   Retention rate: {X.shape[1]/(X.shape[1]+total_dropped)*100:.1f}%")
 
     # --- STANDARDIZE FEATURES ---
-    print(f"\n🔍 PREPROCESSING STEP 13: Applying StandardScaler")
+    print(f"\n🔍 PREPROCESSING STEP 12: Applying StandardScaler")
     scaler = StandardScaler()
     X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns, index=X.index)
-    print(f"✅ PREPROCESSING STEP 13: Standardization completed.")
+    print(f"✅ PREPROCESSING STEP 12: Standardization completed.")
     print(f"   Feature means after scaling: {X.mean().abs().max():.6f} (should be ~0)")
     print(f"   Feature stds after scaling: {X.std().mean():.6f} (should be ~1)")
 

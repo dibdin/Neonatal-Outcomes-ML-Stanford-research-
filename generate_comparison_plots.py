@@ -136,8 +136,8 @@ def generate_comparison_plots(target_type, all_results):
     for model_type in ['lasso', 'elasticnet']:
         print(f"  Processing {model_type}...")
         # Find heel and cord results for both_samples
-        heel_key = f"both_samples_heel_{model_type}_Biomarker_{target_type}"
-        cord_key = f"both_samples_cord_{model_type}_Biomarker_{target_type}"
+        heel_key = f"both_samples_heel_{model_type}_cv_Biomarker_{target_type}"
+        cord_key = f"both_samples_cord_{model_type}_cv_Biomarker_{target_type}"
         heel_result = all_results.get(heel_key)
         cord_result = all_results.get(cord_key)
         if heel_result and cord_result:
@@ -152,8 +152,8 @@ def generate_comparison_plots(target_type, all_results):
         else:
             print(f"    ✗ Missing heel or cord result for both_samples {model_type} {target_type}")
         # Find heel_all and cord_all results
-        heel_key2 = f"heel_all_heel_{model_type}_Biomarker_{target_type}"
-        cord_key2 = f"cord_all_cord_{model_type}_Biomarker_{target_type}"
+        heel_key2 = f"heel_all_heel_{model_type}_cv_Biomarker_{target_type}"
+        cord_key2 = f"cord_all_cord_{model_type}_cv_Biomarker_{target_type}"
         heel_result2 = all_results.get(heel_key2)
         cord_result2 = all_results.get(cord_key2)
         if heel_result2 and cord_result2:

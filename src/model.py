@@ -23,7 +23,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.impute import KNNImputer
 from sklearn.base import clone
 from sklearn.linear_model import ElasticNet, Lasso, LogisticRegression
-from sklearn.model_selection import GridSearchCV, cross_val_score, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, cross_val_score, StratifiedKFold, KFold
 import numpy as np
 
 # Global configuration
@@ -87,7 +87,7 @@ def get_model(model_type):
         cv_model = GridSearchCV(
             pipeline, 
             param_grid, 
-            cv=3,  # Reduced for faster execution
+            cv=KFold(n_splits=5, shuffle=True, random_state=random_state),  # 5-fold CV for regression
             scoring='neg_mean_squared_error',
             n_jobs=-1,
             verbose=0
@@ -114,7 +114,7 @@ def get_model(model_type):
         cv_model = GridSearchCV(
             pipeline, 
             param_grid, 
-            cv=3,  # Reduced for faster execution
+            cv=KFold(n_splits=5, shuffle=True, random_state=random_state),  # 5-fold CV for regression
             scoring='neg_mean_squared_error',
             n_jobs=-1,
             verbose=0
@@ -229,7 +229,7 @@ def get_classification_model(model_type):
         cv_model = GridSearchCV(
             pipeline, 
             param_grid, 
-            cv=3,  # Reduced for faster execution
+            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),  # Use stratification for classification
             scoring='roc_auc',
             n_jobs=-1,
             verbose=0
