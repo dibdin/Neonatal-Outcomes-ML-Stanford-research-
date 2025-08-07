@@ -39,7 +39,13 @@ from src.utils import (
     plot_true_vs_predicted_scatter, plot_biomarker_frequency_heel_vs_cord,
     plot_feature_frequency, save_all_as_pickle
 )
-from src.config import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF
+# Try to import Sherlock config first, fall back to regular config
+try:
+    from src.config_sherlock import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF
+    print("🔧 Using Sherlock config (N_REPEATS=10)")
+except ImportError:
+    from src.config import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF
+    print("🔧 Using regular config (N_REPEATS=100)")
 
 DATA_OPTION_LABELS = {1: 'both_samples', 2: 'heel_all', 3: 'cord_all'}
 
@@ -658,6 +664,7 @@ def main(target_type='gestational_age'):
     # Clear scatter plot directories to force regeneration
     import shutil
     import os
+    import traceback
     
     print(f"\n{'='*80}")
     print("CLEARING SCATTER PLOT DIRECTORIES TO FORCE REGENERATION")
@@ -672,6 +679,11 @@ def main(target_type='gestational_age'):
             print(f"✅ Cleared directory: {target}")
         os.makedirs(target, exist_ok=True)
         print(f"✅ Created directory: {target}")
+    
+    print(f"\n{'='*80}")
+    print(f"STARTING MAIN ANALYSIS FOR TARGET: {target_type.upper()}")
+    print(f"CONFIG: N_REPEATS={N_REPEATS}, TEST_SIZE={TEST_SIZE}, PRETERM_CUTOFF={PRETERM_CUTOFF}")
+    print(f"{'='*80}")
     
     # Configuration
     dataset_types = ['heel', 'cord']
@@ -724,9 +736,16 @@ def main(target_type='gestational_age'):
                     if model_type not in allowed_models:
                         print(f"Skipping {model_name} model with {model_type} (not allowed)")
                         continue
-                    results = run_single_model(model_name, data_type, dataset_type, model_type, data_option, data_option_label, target_type)
-                    model_results[model_name] = results
-                    all_results[f"{data_option_label}_{dataset_type}_{model_type}_{model_name}"] = results
+                    try:
+                        print(f"\n🔍 DEBUG: Starting training for {model_name} ({data_type}) on {dataset_type} with {model_type}")
+                        results = run_single_model(model_name, data_type, dataset_type, model_type, data_option, data_option_label, target_type)
+                        model_results[model_name] = results
+                        all_results[f"{data_option_label}_{dataset_type}_{model_type}_{model_name}"] = results
+                        print(f"✅ Training completed for {model_name} ({data_type}) on {dataset_type} with {model_type}")
+                    except Exception as e:
+                        print(f"❌ ERROR training {model_name} ({data_type}) on {dataset_type} with {model_type}: {e}")
+                        print(f"❌ ERROR DETAILS: {traceback.format_exc()}")
+                        continue
                     # Update output/plot filenames in generate_model_outputs as well
                     generate_model_outputs(model_name, data_type, dataset_type, model_type, results, None, None, results['summary']['auc_mean'], data_option_label, target_type)
                     print_detailed_summary(model_name, dataset_type, model_type, results)

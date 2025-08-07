@@ -10,8 +10,17 @@
 # Load Python module
 module load python/3.9
 
+# Debug: Check Python version and available modules
+echo "🔍 DEBUG: Python version and environment"
+python --version
+which python
+echo "🔍 DEBUG: Available modules"
+module avail python 2>/dev/null || echo "No module avail command"
+
 # Install required packages if needed
-pip install --user pandas numpy scikit-learn matplotlib seaborn adjustText
+echo "📦 Installing required packages..."
+pip install --user pandas numpy scikit-learn matplotlib seaborn adjustText stabl
+echo "✅ Package installation completed"
 
 echo "🚀 Starting COMPREHENSIVE serum biomarkers analysis..."
 echo "📊 Using configuration from src/config.py"
@@ -19,6 +28,17 @@ echo "🔧 N_REPEATS: 100, TEST_SIZE: 0.2, PRETERM_CUTOFF: 37"
 
 # Step 1: Run gestational age analysis (using config values)
 echo "📊 Step 1: Running gestational age analysis..."
+
+# Debug: Test if we can import the main modules
+echo "🔍 DEBUG: Testing imports..."
+python -c "from src.config_sherlock import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF; print(f'Sherlock config loaded: N_REPEATS={N_REPEATS}, TEST_SIZE={TEST_SIZE}, PRETERM_CUTOFF={PRETERM_CUTOFF}')"
+python -c "from src.data_loader import load_and_process_data; print('Data loader import successful')"
+python -c "from src.model import get_model; print('Model import successful')"
+
+echo "🔍 DEBUG: Testing data loading..."
+python -c "from src.data_loader import load_and_process_data; X, y = load_and_process_data('cord', 'biomarker', 1, target_type='gestational_age'); print(f'Data loading successful: X shape {X.shape}, y shape {y.shape}')"
+
+echo "🔍 DEBUG: Starting main analysis..."
 python main.py gestational_age
 echo "✅ Gestational age analysis completed"
 
