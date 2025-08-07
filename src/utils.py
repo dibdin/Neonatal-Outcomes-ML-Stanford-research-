@@ -700,6 +700,8 @@ def plot_true_vs_predicted_scatter(all_preds_df, filename="outputs/plots/true_vs
         filename (str): Output file path
         target_type (str): Target type ('gestational_age' or 'birth_weight')
     """
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     fig, ax = plt.subplots(figsize=(12, 10))
 
     # Define color mapping for model types with consistent colors
@@ -881,24 +883,26 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
     heel_freq = {}
     cord_freq = {}
     for key, result in model_results.items():
-        if 'heel' in key and 'biomarker' in key and model_type in key:
+        if 'heel' in key and model_type in key:
             if 'all_coefficients' in result and result['all_coefficients'] is not None:
                 all_coefs = result['all_coefficients']
-                feature_names = result.get('feature_names', [f'Feature_{i}' for i in range(len(all_coefs[0]))])
-                for run_coefs in all_coefs:
-                    for i, (name, val) in enumerate(zip(feature_names, run_coefs)):
-                        if name not in heel_freq:
-                            heel_freq[name] = []
-                        heel_freq[name].append(abs(val))
-        elif 'cord' in key and 'biomarker' in key and model_type in key:
+                if len(all_coefs) > 0:  # Check if all_coefs is not empty
+                    feature_names = result.get('feature_names', [f'Feature_{i}' for i in range(len(all_coefs[0]))])
+                    for run_coefs in all_coefs:
+                        for i, (name, val) in enumerate(zip(feature_names, run_coefs)):
+                            if name not in heel_freq:
+                                heel_freq[name] = []
+                            heel_freq[name].append(abs(val))
+        elif 'cord' in key and model_type in key:
             if 'all_coefficients' in result and result['all_coefficients'] is not None:
                 all_coefs = result['all_coefficients']
-                feature_names = result.get('feature_names', [f'Feature_{i}' for i in range(len(all_coefs[0]))])
-                for run_coefs in all_coefs:
-                    for i, (name, val) in enumerate(zip(feature_names, run_coefs)):
-                        if name not in cord_freq:
-                            cord_freq[name] = []
-                        cord_freq[name].append(abs(val))
+                if len(all_coefs) > 0:  # Check if all_coefs is not empty
+                    feature_names = result.get('feature_names', [f'Feature_{i}' for i in range(len(all_coefs[0]))])
+                    for run_coefs in all_coefs:
+                        for i, (name, val) in enumerate(zip(feature_names, run_coefs)):
+                            if name not in cord_freq:
+                                cord_freq[name] = []
+                            cord_freq[name].append(abs(val))
     heel_mean = {name: np.mean(vals) for name, vals in heel_freq.items()}
     cord_mean = {name: np.mean(vals) for name, vals in cord_freq.items()}
     common_biomarkers = set(heel_mean.keys()) & set(cord_mean.keys())
@@ -966,7 +970,7 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
     ax.set_xlabel('Biomarker Frequency (Heel)', fontsize=14, fontweight='bold')
     ax.set_ylabel('Biomarker Frequency (Cord)', fontsize=14, fontweight='bold')
     target_title = target_type.replace('_', ' ').title()
-    ax.set_title(f'Biomarker Frequency Comparison: Heel vs Cord\n{model_type.upper()} Regression - {target_title}', 
+    ax.set_title(f'Biomarker Frequency Comparison: Heel vs Cord\n{model_type.upper()} - {target_title}', 
                 fontsize=16, fontweight='bold', pad=20)
     ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)

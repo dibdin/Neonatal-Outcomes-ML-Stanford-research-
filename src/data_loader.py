@@ -213,7 +213,6 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     # Initialize feature drop tracking
     feature_drops = {
         'high_missing': [],
-        'low_variance': [],
         'perfect_correlation': []
     }
     
@@ -243,50 +242,40 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     
     print(f"   After missing value cleanup - X shape: {X.shape}")
     
-    # Drop features with low variance (< 0.01)
-    feature_variances = X.var()
-    low_var_features = feature_variances[feature_variances < 0.01].index
-    if len(low_var_features) > 0:
-        print(f"❌ PREPROCESSING STEP 8: Dropping {len(low_var_features)} features with variance < 0.01:")
-        for feat in low_var_features:
-            print(f"   - {feat}: variance = {feature_variances[feat]:.6f}")
-        feature_drops['low_variance'] = list(low_var_features)
-        X = X.drop(columns=low_var_features)
-    else:
-        print(f"✅ PREPROCESSING STEP 8: No features with variance < 0.01 found.")
+
     
     # For clinical features, handle categorical variables
     if model_type in ['clinical', 'combined']:
         # Convert categorical variables to numeric
         categorical_cols = X.select_dtypes(include=['object']).columns
         if len(categorical_cols) > 0:
-            print(f"🔍 PREPROCESSING STEP 9: Converting {len(categorical_cols)} categorical variables to numeric: {list(categorical_cols)}")
+            print(f"🔍 PREPROCESSING STEP 8: Converting {len(categorical_cols)} categorical variables to numeric: {list(categorical_cols)}")
             for col in categorical_cols:
                 if col in X.columns:
                     X[col] = pd.Categorical(X[col]).codes
         else:
-            print(f"✅ PREPROCESSING STEP 9: No categorical variables found.")
+            print(f"✅ PREPROCESSING STEP 8: No categorical variables found.")
     
     print(f"   Before imputation - X shape: {X.shape}")
     
     # Use KNNImputer instead of IterativeImputer for faster performance
     from sklearn.impute import KNNImputer
-    print(f"🔍 PREPROCESSING STEP 10: Applying KNNImputer (n_neighbors=5)")
+    print(f"🔍 PREPROCESSING STEP 9: Applying KNNImputer (n_neighbors=5)")
     imputer = KNNImputer(n_neighbors=5, weights='uniform')
     X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
-    print(f"✅ PREPROCESSING STEP 10: Imputation completed. Missing values remaining: {X.isnull().sum().sum()}")
+    print(f"✅ PREPROCESSING STEP 9: Imputation completed. Missing values remaining: {X.isnull().sum().sum()}")
     
 
     
     # Step 1: Remove perfectly correlated feature pairs (|r| = 1.0)
-    print(f"\n🔍 PREPROCESSING STEP 11: Checking for perfectly correlated features (|r| = 1.0)")
+    print(f"\n🔍 PREPROCESSING STEP 10: Checking for perfectly correlated features (|r| = 1.0)")
     abs_corr = X.corr().abs()
     np.fill_diagonal(abs_corr.values, 0)
     perfect_corr = np.where(abs_corr == 1.0)
     perfect_pairs = [(X.columns[i], X.columns[j]) for i, j in zip(*perfect_corr) if i < j]
     
     if perfect_pairs:
-        print(f"❌ PREPROCESSING STEP 11: Found {len(perfect_pairs)} perfectly correlated feature pairs:")
+        print(f"❌ PREPROCESSING STEP 10: Found {len(perfect_pairs)} perfectly correlated feature pairs:")
         for pair in perfect_pairs:
             print(f"   - {pair[0]} ↔ {pair[1]}: |r| = 1.0")
         
@@ -305,7 +294,7 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
             feature_drops['perfect_correlation'] = list(perfect_features_to_drop)
             X = X.drop(columns=list(perfect_features_to_drop))
     else:
-        print(f"✅ PREPROCESSING STEP 11: No perfectly correlated feature pairs found.")
+        print(f"✅ PREPROCESSING STEP 10: No perfectly correlated feature pairs found.")
     
     # Print comprehensive feature drop summary
     print(f"\n📊 FEATURE DROP SUMMARY:")
@@ -324,10 +313,10 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     print(f"   Retention rate: {X.shape[1]/(X.shape[1]+total_dropped)*100:.1f}%")
 
     # --- STANDARDIZE FEATURES ---
-    print(f"\n🔍 PREPROCESSING STEP 12: Applying StandardScaler")
+    print(f"\n🔍 PREPROCESSING STEP 11: Applying StandardScaler")
     scaler = StandardScaler()
     X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns, index=X.index)
-    print(f"✅ PREPROCESSING STEP 12: Standardization completed.")
+    print(f"✅ PREPROCESSING STEP 11: Standardization completed.")
     print(f"   Feature means after scaling: {X.mean().abs().max():.6f} (should be ~0)")
     print(f"   Feature stds after scaling: {X.std().mean():.6f} (should be ~1)")
 

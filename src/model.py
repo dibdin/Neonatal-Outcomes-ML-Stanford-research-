@@ -48,11 +48,12 @@ def get_model(model_type):
         ValueError: If model_type is not recognized
     """
     if model_type == "stabl":
-        lasso = Lasso(max_iter=int(1e6), random_state=random_state)
+        # STABL with cross-validation - STABL handles its own hyperparameter optimization
+        lasso = Lasso(max_iter=10000, fit_intercept=True, tol=1e-4, random_state=random_state)
         base_estimator = clone(lasso)
         stabl = Stabl(
             base_estimator=base_estimator,
-            lambda_grid="[0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]",
+            lambda_grid={"alpha": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
             n_lambda=10,
             artificial_type="random_permutation",
             artificial_proportion=1,
@@ -133,23 +134,25 @@ def get_classification_model(model_type):
         tuple: (model, base_estimator) where base_estimator is None for non-STABL models
     """
     if model_type == "stabl":
-        # Use LogisticRegression as base estimator for STABL classification
+        # STABL with cross-validation - STABL handles its own hyperparameter optimization
         logit_lasso = LogisticRegression(
-            penalty="l1", 
-            max_iter=int(1e6), 
-            solver="liblinear", 
-            class_weight="balanced", 
+            penalty="l1",
+            solver="saga",
+            max_iter=10000,  # Increased for better convergence
+            fit_intercept=True,  # Explicitly set
+            tol=1e-4,  # Relaxed tolerance for better convergence
+            class_weight="balanced",  # Handle class imbalance
             random_state=random_state
         )
         model = Stabl(
             base_estimator=clone(logit_lasso),
-            lambda_grid="[0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]",
+            lambda_grid={"C": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
             n_lambda=10,
-            n_bootstraps=500,
-            random_state=random_state,
-            verbose=1,
             artificial_type="random_permutation",
             artificial_proportion=1,
+            n_bootstraps=500,
+            random_state=random_state,
+            verbose=1
         )
         return model, logit_lasso
     elif model_type == "elasticnet":

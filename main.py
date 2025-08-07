@@ -24,6 +24,7 @@ from sklearn.metrics import roc_auc_score, roc_curve, accuracy_score, confusion_
 import pickle
 from sklearn.preprocessing import StandardScaler
 import os # Added for os.makedirs
+import shutil
 
 from src.data_loader import split_data, load_and_process_data
 from src.model import train_model, predict_model, get_model
@@ -36,7 +37,7 @@ from src.utils import (
     plot_metrics_with_confidence_intervals, plot_summary_auc_by_dataset_and_model,
     plot_summary_mae_by_dataset_and_model, plot_summary_rmse_by_dataset_and_model,
     plot_true_vs_predicted_scatter, plot_biomarker_frequency_heel_vs_cord,
-    save_all_as_pickle
+    plot_feature_frequency, save_all_as_pickle
 )
 from src.config import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF
 
@@ -654,13 +655,31 @@ def main(target_type='gestational_age'):
     Args:
         target_type (str): Target variable type ('gestational_age' or 'birth_weight')
     """
+    # Clear scatter plot directories to force regeneration
+    import shutil
+    import os
+    
+    print(f"\n{'='*80}")
+    print("CLEARING SCATTER PLOT DIRECTORIES TO FORCE REGENERATION")
+    print(f"{'='*80}")
+    
+    for target in [
+        "outputs/plots/gestational_age/scatter_plots",
+        "outputs/plots/birth_weight/scatter_plots"
+    ]:
+        if os.path.exists(target):
+            shutil.rmtree(target, ignore_errors=True)
+            print(f"✅ Cleared directory: {target}")
+        os.makedirs(target, exist_ok=True)
+        print(f"✅ Created directory: {target}")
+    
     # Configuration
     dataset_types = ['heel', 'cord']
-    model_types = ['lasso_cv', 'elasticnet_cv']
+    model_types = ['lasso_cv', 'elasticnet_cv', 'stabl']
     model_configs = [
-        {'name': 'Clinical', 'data_type': 'clinical', 'allowed_models': ['lasso_cv', 'elasticnet_cv']},
-        {'name': 'Biomarker', 'data_type': 'biomarker', 'allowed_models': ['lasso_cv', 'elasticnet_cv']},
-        {'name': 'Combined', 'data_type': 'combined', 'allowed_models': ['lasso_cv', 'elasticnet_cv']}
+        {'name': 'Clinical', 'data_type': 'clinical', 'allowed_models': ['lasso_cv', 'elasticnet_cv', 'stabl']},
+        {'name': 'Biomarker', 'data_type': 'biomarker', 'allowed_models': ['lasso_cv', 'elasticnet_cv', 'stabl']},
+        {'name': 'Combined', 'data_type': 'combined', 'allowed_models': ['lasso_cv', 'elasticnet_cv', 'stabl']}
     ]
     
     print(f"\n{'='*80}")
@@ -766,7 +785,7 @@ def main(target_type='gestational_age'):
     print(summary_df)
     
     # Create separate plots for each model type and data option (including AUC)
-    for model_type in ['lasso_cv', 'elasticnet_cv']:
+    for model_type in ['lasso_cv', 'elasticnet_cv', 'stabl']:
         for data_option in [1, 2, 3]:
             data_option_label = DATA_OPTION_LABELS[data_option]
             
@@ -797,7 +816,7 @@ def main(target_type='gestational_age'):
                 )
     
     # Also create the original aggregated plots for comparison
-    for model_type in ['lasso_cv', 'elasticnet_cv']:
+    for model_type in ['lasso_cv', 'elasticnet_cv', 'stabl']:
         # Filter data for this model type
         model_df = summary_df[summary_df['ModelType'] == model_type].copy()
         if not model_df.empty:
@@ -842,9 +861,9 @@ def main(target_type='gestational_age'):
             # Collect predictions from all model types for this dataset and data option
             pred_rows = []
             
-            for model_type in ['lasso_cv', 'elasticnet_cv']:
+            for model_type in ['lasso_cv', 'elasticnet_cv', 'stabl']:
                 for model_name in ['Clinical', 'Biomarker', 'Combined']:
-                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}_{target_type}"
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
                     
                     if result_key in all_results:
                         result = all_results[result_key]
@@ -878,6 +897,110 @@ def main(target_type='gestational_age'):
                 )
                 print(f"Combined scatter plot for {data_option_label} {dataset} saved: true_vs_predicted_scatter_{data_option_label}_{dataset}_{target_type}.png")
     
+    # --- Create separate scatter plots per model type and data option ---
+    print(f"\n{'='*80}")
+    print("GENERATING SEPARATE SCATTER PLOTS PER MODEL TYPE")
+    print(f"{'='*80}")
+    
+    for model_type in ['lasso_cv', 'elasticnet_cv', 'stabl']:
+        model_display_name = model_type.replace('_cv', '').capitalize()
+        print(f"\n--- Generating separate scatter plots for {model_display_name} ---")
+        
+        for data_option in [1, 2, 3]:
+            data_option_label = DATA_OPTION_LABELS[data_option]
+            
+            # Determine which datasets to process based on data option
+            if data_option == 1:
+                datasets_to_process = ['heel', 'cord']
+            elif data_option == 2:
+                datasets_to_process = ['heel']
+            elif data_option == 3:
+                datasets_to_process = ['cord']
+            
+            # For both_samples (data_option = 1), combine heel and cord data on one plot
+            if data_option == 1:
+                # Collect predictions for both heel and cord datasets
+                pred_rows = []
+                
+                for dataset in datasets_to_process:
+                    for model_name in ['Clinical', 'Biomarker', 'Combined']:
+                        result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                        
+                        if result_key in all_results:
+                            result = all_results[result_key]
+                            for run in result.get('predictions', []):
+                                true_vals = run.get('true', [])
+                                pred_vals = run.get('pred', [])
+                                for t, p in zip(true_vals, pred_vals):
+                                    # Determine column names based on target type
+                                    if target_type == 'birth_weight':
+                                        true_col = 'True_BW'
+                                        pred_col = 'Pred_BW'
+                                    else:  # gestational_age
+                                        true_col = 'True_GA'
+                                        pred_col = 'Pred_GA'
+                                    
+                                    pred_rows.append({
+                                        true_col: float(t),
+                                        pred_col: float(p),
+                                        'Model': model_name,
+                                        'Dataset': dataset,
+                                        'DataOption': data_option_label
+                                    })
+                
+                if pred_rows:
+                    preds_df = pd.DataFrame(pred_rows)
+                    plot_true_vs_predicted_scatter(
+                        preds_df,
+                        filename=f"outputs/plots/true_vs_predicted_scatter_{model_display_name}_{data_option_label}_{target_type}.png",
+                        target_type=target_type
+                    )
+                    print(f"  {model_display_name} scatter plot for {data_option_label} (heel + cord combined) saved")
+                else:
+                    print(f"  No predictions found for {model_display_name} on {data_option_label}")
+            
+            else:
+                # For other data options (heel_all, cord_all), also combine heel and cord data on one plot
+                # Collect predictions for both heel and cord datasets
+                pred_rows = []
+                
+                for dataset in ['heel', 'cord']:  # Always include both datasets
+                    for model_name in ['Clinical', 'Biomarker', 'Combined']:
+                        result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                        
+                        if result_key in all_results:
+                            result = all_results[result_key]
+                            for run in result.get('predictions', []):
+                                true_vals = run.get('true', [])
+                                pred_vals = run.get('pred', [])
+                                for t, p in zip(true_vals, pred_vals):
+                                    # Determine column names based on target type
+                                    if target_type == 'birth_weight':
+                                        true_col = 'True_BW'
+                                        pred_col = 'Pred_BW'
+                                    else:  # gestational_age
+                                        true_col = 'True_GA'
+                                        pred_col = 'Pred_GA'
+                                    
+                                    pred_rows.append({
+                                        true_col: float(t),
+                                        pred_col: float(p),
+                                        'Model': model_name,
+                                        'Dataset': dataset,
+                                        'DataOption': data_option_label
+                                    })
+                
+                if pred_rows:
+                    preds_df = pd.DataFrame(pred_rows)
+                    plot_true_vs_predicted_scatter(
+                        preds_df,
+                        filename=f"outputs/plots/true_vs_predicted_scatter_{model_display_name}_{data_option_label}_{target_type}.png",
+                        target_type=target_type
+                    )
+                    print(f"  {model_display_name} scatter plot for {data_option_label} (heel + cord combined) saved")
+                else:
+                    print(f"  No predictions found for {model_display_name} on {data_option_label}")
+    
     # Also create overall combined scatter plots for each model type across all data options
     for model_type in ['lasso_cv', 'elasticnet_cv']:
         # Collect predictions from all data options and datasets for this model type
@@ -896,7 +1019,7 @@ def main(target_type='gestational_age'):
             
             for dataset in datasets_to_process:
                 for model_name in ['Clinical', 'Biomarker', 'Combined']:
-                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}_{target_type}"
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
                     
                     if result_key in all_results:
                         result = all_results[result_key]
@@ -923,12 +1046,78 @@ def main(target_type='gestational_age'):
         
         if pred_rows:
             preds_df = pd.DataFrame(pred_rows)
+            # Create model-specific scatter plot with clean model name
+            model_display_name = model_type.replace('_cv', '').capitalize()
             plot_true_vs_predicted_scatter(
                 preds_df,
-                filename=f"outputs/plots/true_vs_predicted_scatter_{model_type}_{target_type}.png",
+                filename=f"outputs/plots/true_vs_predicted_scatter_{model_display_name}_{target_type}.png",
                 target_type=target_type
             )
-            print(f"Overall combined scatter plot for {model_type} saved: true_vs_predicted_scatter_{model_type}_{target_type}.png")
+            print(f"Model-specific scatter plot for {model_display_name} saved: true_vs_predicted_scatter_{model_display_name}_{target_type}.png")
+    
+    # --- Create overall combined scatter plots that combine heel_all and cord_all data ---
+    print(f"\n{'='*80}")
+    print("GENERATING OVERALL COMBINED SCATTER PLOTS (HEEL_ALL + CORD_ALL)")
+    print(f"{'='*80}")
+    
+    for model_type in ['lasso_cv', 'elasticnet_cv', 'stabl']:
+        model_display_name = model_type.replace('_cv', '').capitalize()
+        print(f"\n--- Creating overall combined plot for {model_display_name} ---")
+        
+        # Collect predictions from both heel_all and cord_all data options
+        pred_rows = []
+        
+        for data_option_label in ['heel_all', 'cord_all']:
+            print(f"  Processing {data_option_label}...")
+            
+            for dataset in ['heel', 'cord']:  # Include both datasets
+                for model_name in ['Clinical', 'Biomarker', 'Combined']:
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                    
+                    if result_key in all_results:
+                        result = all_results[result_key]
+                        for run in result.get('predictions', []):
+                            true_vals = run.get('true', [])
+                            pred_vals = run.get('pred', [])
+                            for t, p in zip(true_vals, pred_vals):
+                                # Determine column names based on target type
+                                if target_type == 'birth_weight':
+                                    true_col = 'True_BW'
+                                    pred_col = 'Pred_BW'
+                                else:  # gestational_age
+                                    true_col = 'True_GA'
+                                    pred_col = 'Pred_GA'
+                                
+                                pred_rows.append({
+                                    true_col: float(t),
+                                    pred_col: float(p),
+                                    'Model': model_name,
+                                    'Dataset': dataset,
+                                    'DataOption': data_option_label
+                                })
+        
+        if pred_rows:
+            preds_df = pd.DataFrame(pred_rows)
+            plot_true_vs_predicted_scatter(
+                preds_df,
+                filename=f"outputs/plots/true_vs_predicted_scatter_{model_display_name}_overall_{target_type}.png",
+                target_type=target_type
+            )
+            print(f"  {model_display_name} overall combined scatter plot saved")
+            print(f"  Total predictions: {len(pred_rows)}")
+            
+            # Count predictions by data option and dataset
+            heel_all_heel = sum(1 for row in pred_rows if row['DataOption'] == 'heel_all' and row['Dataset'] == 'heel')
+            heel_all_cord = sum(1 for row in pred_rows if row['DataOption'] == 'heel_all' and row['Dataset'] == 'cord')
+            cord_all_heel = sum(1 for row in pred_rows if row['DataOption'] == 'cord_all' and row['Dataset'] == 'heel')
+            cord_all_cord = sum(1 for row in pred_rows if row['DataOption'] == 'cord_all' and row['Dataset'] == 'cord')
+            
+            print(f"  Heel_all heel: {heel_all_heel}")
+            print(f"  Heel_all cord: {heel_all_cord}")
+            print(f"  Cord_all heel: {cord_all_heel}")
+            print(f"  Cord_all cord: {cord_all_cord}")
+        else:
+            print(f"  No predictions found for {model_display_name}")
     
     # Create the final overall scatter plot with all models combined
     all_pred_rows = []
@@ -944,9 +1133,9 @@ def main(target_type='gestational_age'):
             datasets_to_process = ['cord']
         
         for dataset in datasets_to_process:
-            for model_type in ['lasso_cv', 'elasticnet_cv']:
+            for model_type in ['lasso_cv', 'elasticnet_cv', 'stabl']:
                 for model_name in ['Clinical', 'Biomarker', 'Combined']:
-                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}_{target_type}"
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
                     
                     if result_key in all_results:
                         result = all_results[result_key]
@@ -982,7 +1171,7 @@ def main(target_type='gestational_age'):
     # plot_biomarker_frequency_heel_vs_cord(all_results, filename="outputs/plots/biomarker_frequency.png") # This line is removed
 
     # Create biomarker frequency comparison plots (Heel vs Cord) for each model type
-    for model_type in ['lasso_cv', 'elasticnet_cv']:
+    for model_type in ['lasso_cv', 'elasticnet_cv', 'stabl']:
         # Option 1: Heel vs Cord comparison using both_samples data
         option1_results = {k: v for k, v in all_results.items() if 'both_samples' in k}
         if option1_results:
@@ -1005,80 +1194,110 @@ def main(target_type='gestational_age'):
             )
             print(f"Options 2+3 (heel_all + cord_all) heel vs cord comparison plot saved: biomarker_frequency_heel_vs_cord_{model_type}_{target_type}_options2_3_heel_cord_all.png")
 
-    # --- After all training, generate biomarker frequency plot for best model (by RMSE) for each dataset and data option ---
-    from src.utils import count_high_weight_biomarkers, plot_feature_frequency
+    # --- Generate biomarker frequency plots for BEST models only (regression and classification) ---
+    print(f"\n{'='*80}")
+    print("GENERATING BIOMARKER FREQUENCY PLOTS FOR BEST MODELS")
+    print(f"{'='*80}")
     
-    # Generate best model biomarker frequency plots for each data option
+    # Find the best regression model and best classification model for each dataset type
+    best_models = {
+        'Clinical': {'regression': None, 'classification': None},
+        'Biomarker': {'regression': None, 'classification': None},
+        'Combined': {'regression': None, 'classification': None}
+    }
+    
+    # Initialize best performance metrics for each dataset type
+    best_rmse = {'Clinical': float('inf'), 'Biomarker': float('inf'), 'Combined': float('inf')}
+    best_auc = {'Clinical': 0.0, 'Biomarker': 0.0, 'Combined': 0.0}
+    
     for data_option in [1, 2, 3]:
         data_option_label = DATA_OPTION_LABELS[data_option]
         
         # Determine which datasets to process based on data option
         if data_option == 1:
-            # Option 1: both samples - process both heel and cord
             datasets_to_process = ['heel', 'cord']
         elif data_option == 2:
-            # Option 2: all heel - only process heel
             datasets_to_process = ['heel']
         elif data_option == 3:
-            # Option 3: all cord - only process cord
             datasets_to_process = ['cord']
         
         for dataset in datasets_to_process:
-            # Filter summary_df for biomarker models of this dataset and data option
-            biomarker_df = summary_df[(summary_df['Dataset'] == dataset) & (summary_df['Model'] == 'Biomarker') & (summary_df['DataOption'] == data_option_label)]
-            if biomarker_df.empty:
-                print(f"No biomarker models found for {dataset} dataset in {data_option_label}.")
-                continue
-            # Find the row with the lowest RMSE (best regression performance)
-            best_row = biomarker_df.loc[biomarker_df['RMSE'].idxmin()]
-            best_rmse = best_row['RMSE']
-            best_model_type = best_row['ModelType']
+            for model_type in ['lasso_cv', 'elasticnet_cv', 'stabl']:
+                for model_name in ['Clinical', 'Biomarker', 'Combined']:
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
+                    
+                    if result_key not in all_results:
+                        continue
+                    
+                    results = all_results[result_key]
+                    
+                    # Check for best regression model for this dataset type (lowest RMSE)
+                    if 'summary' in results and 'rmse_mean' in results['summary']:
+                        rmse = results['summary']['rmse_mean']
+                        if rmse < best_rmse[model_name]:
+                            best_rmse[model_name] = rmse
+                            best_models[model_name]['regression'] = {
+                                'key': result_key,
+                                'results': results,
+                                'model_type': model_type,
+                                'model_name': model_name,
+                                'data_option': data_option_label,
+                                'dataset': dataset,
+                                'rmse': rmse
+                            }
+                    
+                    # Check for best classification model for this dataset type (highest AUC)
+                    if 'summary' in results and 'auc_mean' in results['summary']:
+                        auc = results['summary']['auc_mean']
+                        if auc > best_auc[model_name]:
+                            best_auc[model_name] = auc
+                            best_models[model_name]['classification'] = {
+                                'key': result_key,
+                                'results': results,
+                                'model_type': model_type,
+                                'model_name': model_name,
+                                'data_option': data_option_label,
+                                'dataset': dataset,
+                                'auc': auc
+                            }
+    
+    # Generate plots for each dataset type's best models
+    for dataset_type in ['Clinical', 'Biomarker', 'Combined']:
+        print(f"\n{'='*60}")
+        print(f"BEST MODELS FOR {dataset_type.upper()} DATASET")
+        print(f"{'='*60}")
+        
+        # Best regression model for this dataset type
+        if best_models[dataset_type]['regression']:
+            best_reg = best_models[dataset_type]['regression']
+            print(f"\n--- Best {dataset_type} Regression Model ---")
+            print(f"Model: {best_reg['model_type']} {best_reg['model_name']}")
+            print(f"Dataset: {best_reg['dataset']} ({best_reg['data_option']})")
+            print(f"RMSE: {best_reg['rmse']:.4f}")
             
-            # Get the results from all_results dictionary
-            result_key = f"{data_option_label}_{dataset}_{best_model_type}_Biomarker_{target_type}"
-            print(f"Looking for key: {result_key}")
-            print(f"Available keys: {[k for k in all_results.keys() if 'Biomarker' in k and data_option_label in k and dataset in k]}")
-            if result_key not in all_results:
-                print(f"Could not find results for {result_key} in all_results.")
-                continue
+            results = best_reg['results']
+            if 'all_coefficients' in results and results['all_coefficients'] is not None:
+                freq = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.01)
                 
-            results = all_results[result_key]
-            if 'all_coefficients' not in results or 'feature_names' not in results:
-                print(f"No coefficients or feature names found for best biomarker model in {dataset} for {data_option_label}.")
-                continue
-                
-            freq = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.01)
+                plot_feature_frequency(
+                    results['feature_names'],
+                    freq,
+                    filename=f"outputs/plots/best_{dataset_type.lower()}_regression_biomarker_frequency_{target_type}.png",
+                    model_name=f"{best_reg['model_type'].replace('_cv', '').capitalize()} {best_reg['model_name']}",
+                    dataset_name=f"{best_reg['dataset'].capitalize()} ({best_reg['data_option']}) - {target_type} Regression (RMSE: {best_reg['rmse']:.4f})"
+                )
+                print(f"Best {dataset_type} regression biomarker frequency plot saved")
+        
+        # Best classification model for this dataset type
+        if best_models[dataset_type]['classification']:
+            best_cls = best_models[dataset_type]['classification']
+            print(f"\n--- Best {dataset_type} Classification Model ---")
+            print(f"Model: {best_cls['model_type']} {best_cls['model_name']}")
+            print(f"Dataset: {best_cls['dataset']} ({best_cls['data_option']})")
+            print(f"AUC: {best_cls['auc']:.4f}")
             
-            # Debug: Print coefficient statistics
-            print(f"\n[DEBUG] Coefficient statistics for {data_option_label} {dataset} {best_model_type} Biomarker:")
-            all_coefs = np.array(results['all_coefficients'])
-            print(f"  Shape: {all_coefs.shape}")
-            print(f"  Min: {all_coefs.min():.6f}")
-            print(f"  Max: {all_coefs.max():.6f}")
-            print(f"  Mean: {all_coefs.mean():.6f}")
-            print(f"  Std: {all_coefs.std():.6f}")
-            print(f"  Non-zero coefficients: {np.count_nonzero(all_coefs)}")
-            print(f"  Features with any non-zero coef: {np.count_nonzero(np.any(all_coefs != 0, axis=0))}")
-            
-            # Debug: Show frequency calculation with different thresholds
-            freq_01 = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.01)
-            freq_001 = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.001)
-            freq_0001 = count_high_weight_biomarkers(results['all_coefficients'], results['feature_names'], threshold=0.0001)
-            print(f"  Features with freq > 0 (threshold=0.01): {np.sum(freq_01 > 0)}")
-            print(f"  Features with freq > 0 (threshold=0.001): {np.sum(freq_001 > 0)}")
-            print(f"  Features with freq > 0 (threshold=0.0001): {np.sum(freq_0001 > 0)}")
-            
-            plot_feature_frequency(
-                results['feature_names'],
-                freq,
-                filename=f"outputs/plots/best_model_biomarker_frequency_{data_option_label}_{dataset}_{target_type}.png",
-                model_name=best_model_type.capitalize(),
-                dataset_name=f"{dataset.capitalize()} ({data_option_label}) - {target_type}"
-            )
-            print(f"Biomarker frequency plot for best model in {dataset} ({data_option_label}) saved to outputs/plots/best_model_biomarker_frequency_{data_option_label}_{dataset}_{target_type}.png")
-            
-            # Also generate classification biomarker frequency plot if we have classification coefficients
-            if 'all_classification_coefficients' in results and results['all_classification_coefficients']:
+            results = best_cls['results']
+            if 'all_classification_coefficients' in results and results['all_classification_coefficients'] is not None:
                 classification_freq = count_high_weight_biomarkers(results['all_classification_coefficients'], results['feature_names'], threshold=0.01)
                 
                 # Determine classification type for title
@@ -1092,11 +1311,75 @@ def main(target_type='gestational_age'):
                 plot_feature_frequency(
                     results['feature_names'],
                     classification_freq,
-                    filename=f"outputs/plots/best_model_biomarker_frequency_{data_option_label}_{dataset}_{classification_type}.png",
-                    model_name=best_model_type.capitalize(),
-                    dataset_name=f"{dataset.capitalize()} ({data_option_label}) - {classification_title}"
+                    filename=f"outputs/plots/best_{dataset_type.lower()}_classification_biomarker_frequency_{classification_type}.png",
+                    model_name=f"{best_cls['model_type'].replace('_cv', '').capitalize()} {best_cls['model_name']}",
+                    dataset_name=f"{best_cls['dataset'].capitalize()} ({best_cls['data_option']}) - {classification_title} (AUC: {best_cls['auc']:.4f})"
                 )
-                print(f"Classification biomarker frequency plot for best model in {dataset} ({data_option_label}) saved to outputs/plots/best_model_biomarker_frequency_{data_option_label}_{dataset}_{classification_type}.png")
+                print(f"Best {dataset_type} classification biomarker frequency plot saved")
+
+    # --- Generate heel vs cord comparison plots for BEST models from each dataset type ---
+    print(f"\n{'='*80}")
+    print("GENERATING HEEL VS CORD COMPARISON PLOTS FOR BEST MODELS")
+    print(f"{'='*80}")
+    
+    for dataset_type in ['Clinical', 'Biomarker', 'Combined']:
+        print(f"\n{'='*60}")
+        print(f"HEEL VS CORD COMPARISONS FOR {dataset_type.upper()} DATASET")
+        print(f"{'='*60}")
+        
+        # Generate heel vs cord comparison for best regression model of this dataset type
+        if best_models[dataset_type]['regression']:
+            best_reg = best_models[dataset_type]['regression']
+            print(f"\n--- Best {dataset_type} Regression Model Heel vs Cord Comparison ---")
+            
+            # Option 1: Heel vs Cord comparison using both_samples data
+            option1_results = {k: v for k, v in all_results.items() if 'both_samples' in k and best_reg['model_name'] in k and best_reg['model_type'] in k}
+            if option1_results:
+                plot_biomarker_frequency_heel_vs_cord(
+                    option1_results, 
+                    best_reg['model_type'], 
+                    filename=f"outputs/plots/best_{dataset_type.lower()}_regression_heel_vs_cord_{target_type}_option1_both_samples.png",
+                    target_type=target_type
+                )
+                print(f"Best {dataset_type} regression heel vs cord comparison plot (both_samples) saved")
+            
+            # Options 2+3: Heel vs Cord comparison using heel_all and cord_all data
+            option2_3_results = {k: v for k, v in all_results.items() if ('heel_all' in k or 'cord_all' in k) and best_reg['model_name'] in k and best_reg['model_type'] in k}
+            if option2_3_results:
+                plot_biomarker_frequency_heel_vs_cord(
+                    option2_3_results, 
+                    best_reg['model_type'], 
+                    filename=f"outputs/plots/best_{dataset_type.lower()}_regression_heel_vs_cord_{target_type}_options2_3_heel_cord_all.png",
+                    target_type=target_type
+                )
+                print(f"Best {dataset_type} regression heel vs cord comparison plot (heel_all + cord_all) saved")
+        
+        # Generate heel vs cord comparison for best classification model of this dataset type
+        if best_models[dataset_type]['classification']:
+            best_cls = best_models[dataset_type]['classification']
+            print(f"\n--- Best {dataset_type} Classification Model Heel vs Cord Comparison ---")
+            
+            # Option 1: Heel vs Cord comparison using both_samples data
+            option1_results = {k: v for k, v in all_results.items() if 'both_samples' in k and best_cls['model_name'] in k and best_cls['model_type'] in k}
+            if option1_results:
+                plot_biomarker_frequency_heel_vs_cord(
+                    option1_results, 
+                    best_cls['model_type'], 
+                    filename=f"outputs/plots/best_{dataset_type.lower()}_classification_heel_vs_cord_{target_type}_option1_both_samples.png",
+                    target_type=target_type
+                )
+                print(f"Best {dataset_type} classification heel vs cord comparison plot (both_samples) saved")
+            
+            # Options 2+3: Heel vs Cord comparison using heel_all and cord_all data
+            option2_3_results = {k: v for k, v in all_results.items() if ('heel_all' in k or 'cord_all' in k) and best_cls['model_name'] in k and best_cls['model_type'] in k}
+            if option2_3_results:
+                plot_biomarker_frequency_heel_vs_cord(
+                    option2_3_results, 
+                    best_cls['model_type'], 
+                    filename=f"outputs/plots/best_{dataset_type.lower()}_classification_heel_vs_cord_{target_type}_options2_3_heel_cord_all.png",
+                    target_type=target_type
+                )
+                print(f"Best {dataset_type} classification heel vs cord comparison plot (heel_all + cord_all) saved")
 
     # --- Final summary ---
     print(f"\n{'='*80}")
@@ -1108,7 +1391,8 @@ def main(target_type='gestational_age'):
     print("- True vs predicted scatter plots")
     print("- ROC curves for classification")
     print("- Biomarker frequency comparison plots (Heel vs Cord)")
-    print("- Best model biomarker frequency plots")
+    print("- Best model biomarker frequency plots for each dataset type (Clinical, Biomarker, Combined)")
+    print("- Heel vs cord comparison plots for best models from each dataset type")
     
     # Save all_results for inspection
     import pickle

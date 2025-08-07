@@ -100,7 +100,7 @@ def run_plotting_only(target_type='gestational_age'):
             
             for model_type in ['lasso_cv', 'elasticnet_cv']:
                 for model_name in ['Clinical', 'Biomarker', 'Combined']:
-                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}_{target_type}"
+                    result_key = f"{data_option_label}_{dataset}_{model_type}_{model_name}"
                     
                     if result_key in all_results:
                         result = all_results[result_key]
@@ -169,7 +169,7 @@ def run_plotting_only(target_type='gestational_age'):
             best_model_type = best_row['ModelType']
             
             # Get the results from all_results dictionary
-            result_key = f"{data_option_label}_{dataset}_{best_model_type}_Biomarker_{target_type}"
+            result_key = f"{data_option_label}_{dataset}_{best_model_type}_Biomarker"
             print(f"Looking for key: {result_key}")
             print(f"Available keys: {[k for k in all_results.keys() if 'Biomarker' in k and data_option_label in k and dataset in k]}")
             
