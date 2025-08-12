@@ -120,31 +120,59 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     if model_type == 'clinical':
         # Clinical/demographic features - adjust based on target_type
         if target_type == 'gestational_age':
-            # Original: birth_weight, sex, birth_order (columns 145, 146, 159)
-            clinical_cols = [df.columns[144], df.columns[145], df.columns[158]]  # 0-indexed, so 145->144, 146->145, 159->158
+            # Original: birth_weight, sex, multiple_birth (columns 145, 146, 159)
+            clinical_cols = [df.columns[144], df.columns[145], df.columns[157]]  # 0-indexed, so 145->144, 146->145, 159->158
         else:  # target_type == 'birth_weight'
-            # SGA pipeline: gestational_age_weeks, sex, birth_order (replace birth_weight with gestational_age_weeks)
-            clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[158]]  # gestational_age_weeks, sex, birth_order
+            # SGA pipeline: gestational_age_weeks, sex, multiple_birth (replace birth_weight with gestational_age_weeks)
+            clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[157]]  # gestational_age_weeks, sex, multiple_birth
         
         print(f"🔍 PREPROCESSING STEP 3: Base clinical columns: {clinical_cols}")
         
         # Extract base clinical features
         X_clinical = data_df[clinical_cols].copy()
         
-        # Create pairwise interactions
+        # Create pairwise interactions for all clinical features
+        print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(clinical_cols)} clinical features...")
         interaction_features = []
         for col1, col2 in combinations(clinical_cols, 2):
             interaction_name = f"{col1}_x_{col2}"
             X_clinical[interaction_name] = X_clinical[col1] * X_clinical[col2]
             interaction_features.append(interaction_name)
             
-        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} pairwise interactions: {interaction_features}")
+        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} clinical interactions: {interaction_features}")
         feature_cols = clinical_cols + interaction_features
         
     elif model_type == 'biomarker':
         # Biomarker features (columns 30-141)
-        feature_cols = df.columns[30:141].tolist()
-        print(f"🔍 PREPROCESSING STEP 3: Selected {len(feature_cols)} biomarker features")
+        biomarker_cols = df.columns[30:141].tolist()
+        print(f"🔍 PREPROCESSING STEP 3: Selected {len(biomarker_cols)} biomarker features")
+        
+        # Create pairwise interactions for all biomarkers
+        print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(biomarker_cols)} biomarkers...")
+        X_biomarker = data_df[biomarker_cols].copy()
+        
+        # Calculate number of interactions (n choose 2)
+        n_biomarkers = len(biomarker_cols)
+        n_interactions = (n_biomarkers * (n_biomarkers - 1)) // 2
+        print(f"   Will create {n_interactions} pairwise interactions...")
+        
+        # Create pairwise interactions
+        interaction_features = []
+        interaction_count = 0
+        
+        for i, col1 in enumerate(biomarker_cols):
+            for j, col2 in enumerate(biomarker_cols[i+1:], i+1):  # Start from i+1 to avoid duplicates
+                interaction_name = f"{col1}_x_{col2}"
+                X_biomarker[interaction_name] = X_biomarker[col1] * X_biomarker[col2]
+                interaction_features.append(interaction_name)
+                interaction_count += 1
+                
+                # Progress update every 1000 interactions
+                if interaction_count % 1000 == 0:
+                    print(f"   Created {interaction_count}/{n_interactions} interactions...")
+        
+        feature_cols = biomarker_cols + interaction_features
+        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} biomarker interactions. Total features: {len(feature_cols)}")
         
     elif model_type == 'combined':
         # Both clinical and biomarker features
@@ -163,27 +191,63 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         # Extract base clinical features
         X_clinical = data_df[clinical_cols].copy()
         
-        # Create pairwise interactions
+        # Extract base biomarker features
+        X_biomarker = data_df[biomarker_cols].copy()
+        
+        # Combine all features for pairwise interactions
+        all_features = biomarker_cols + clinical_cols
+        print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(all_features)} total features...")
+        
+        # Calculate number of interactions (n choose 2)
+        n_features = len(all_features)
+        n_interactions = (n_features * (n_features - 1)) // 2
+        print(f"   Will create {n_interactions} pairwise interactions...")
+        
+        # Create pairwise interactions for all features
         interaction_features = []
-        for col1, col2 in combinations(clinical_cols, 2):
-            interaction_name = f"{col1}_x_{col2}"
-            X_clinical[interaction_name] = X_clinical[col1] * X_clinical[col2]
-            interaction_features.append(interaction_name)
-            
-        clinical_with_interactions = clinical_cols + interaction_features
-        feature_cols = biomarker_cols + clinical_with_interactions
-        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} clinical interactions. Total features: {len(feature_cols)}")
+        interaction_count = 0
+        
+        for i, col1 in enumerate(all_features):
+            for j, col2 in enumerate(all_features[i+1:], i+1):  # Start from i+1 to avoid duplicates
+                interaction_name = f"{col1}_x_{col2}"
+                
+                # Get the data for both features
+                if col1 in biomarker_cols:
+                    data1 = X_biomarker[col1]
+                else:
+                    data1 = X_clinical[col1]
+                    
+                if col2 in biomarker_cols:
+                    data2 = X_biomarker[col2]
+                else:
+                    data2 = X_clinical[col2]
+                
+                # Create interaction and add to appropriate dataframe
+                interaction_data = data1 * data2
+                if col1 in biomarker_cols or col2 in biomarker_cols:
+                    X_biomarker[interaction_name] = interaction_data
+                else:
+                    X_clinical[interaction_name] = interaction_data
+                
+                interaction_features.append(interaction_name)
+                interaction_count += 1
+                
+                # Progress update every 1000 interactions
+                if interaction_count % 1000 == 0:
+                    print(f"   Created {interaction_count}/{n_interactions} interactions...")
+        
+        feature_cols = biomarker_cols + clinical_cols + interaction_features
+        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} pairwise interactions. Total features: {len(feature_cols)}")
 
     # Extract features and labels
     if model_type == 'clinical':
         X = X_clinical
         y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
     elif model_type == 'biomarker':
-        X = data_df[feature_cols]
+        X = X_biomarker
         y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
     elif model_type == 'combined':
         # For combined, we need to merge biomarker and clinical data
-        X_biomarker = data_df[biomarker_cols]
         y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
         
         # Merge biomarker and clinical data
@@ -206,9 +270,9 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         print(f"   Biomarkers with HGB: {[col for col in feature_cols if 'HGB' in col]}")
     elif model_type == 'combined':
         biomarker_count = len(biomarker_cols)
-        clinical_count = len(clinical_with_interactions)
+        clinical_count = len(clinical_cols)
         print(f"   Biomarker features: {biomarker_count}")
-        print(f"   Clinical features (with interactions): {clinical_count}")
+        print(f"   Clinical features: {clinical_count}")
 
     # Initialize feature drop tracking
     feature_drops = {
