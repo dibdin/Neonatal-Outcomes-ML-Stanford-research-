@@ -47,22 +47,24 @@ def get_model(model_type):
     Raises:
         ValueError: If model_type is not recognized
     """
-    if model_type == "stabl":
-        # STABL with cross-validation - STABL handles its own hyperparameter optimization
-        lasso = Lasso(max_iter=10000, fit_intercept=True, tol=1e-4, random_state=random_state)
-        base_estimator = clone(lasso)
-        stabl = Stabl(
-            base_estimator=base_estimator,
-            lambda_grid={"alpha": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
-            n_lambda=10,
-            artificial_type="random_permutation",
-            artificial_proportion=1,
-            n_bootstraps=500,
-            random_state=random_state,
-            verbose=1
-        )
-        return stabl, base_estimator
-    elif model_type == "elasticnet":
+    # STABL code commented out due to long runtime
+    # if model_type == "stabl":
+    #     # STABL with cross-validation - STABL handles its own hyperparameter optimization
+    #     lasso = Lasso(max_iter=10000, fit_intercept=True, tol=1e-4, random_state=random_state)
+    #     base_estimator = clone(lasso)
+    #     stabl = Stabl(
+    #         base_estimator=base_estimator,
+    #         lambda_grid={"alpha": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
+    #         n_lambda=10,
+    #         artificial_type="random_permutation",
+    #         artificial_proportion=1,
+    #         n_bootstraps=500,
+    #         random_state=random_state,
+    #         verbose=1
+    #     )
+    #     return stabl, base_estimator
+    # elif model_type == "elasticnet":
+    if model_type == "elasticnet":
         return ElasticNet(alpha=0.1), None
     elif model_type == "lasso":
         return Lasso(alpha=0.1, max_iter=2000), None
@@ -133,29 +135,31 @@ def get_classification_model(model_type):
     Returns:
         tuple: (model, base_estimator) where base_estimator is None for non-STABL models
     """
-    if model_type == "stabl":
-        # STABL with cross-validation - STABL handles its own hyperparameter optimization
-        logit_lasso = LogisticRegression(
-            penalty="l1",
-            solver="saga",
-            max_iter=10000,  # Increased for better convergence
-            fit_intercept=True,  # Explicitly set
-            tol=1e-4,  # Relaxed tolerance for better convergence
-            class_weight="balanced",  # Handle class imbalance
-            random_state=random_state
-        )
-        model = Stabl(
-            base_estimator=clone(logit_lasso),
-            lambda_grid={"C": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
-            n_lambda=10,
-            artificial_type="random_permutation",
-            artificial_proportion=1,
-            n_bootstraps=500,
-            random_state=random_state,
-            verbose=1
-        )
-        return model, logit_lasso
-    elif model_type == "elasticnet":
+    # STABL classification code commented out due to long runtime
+    # if model_type == "stabl":
+    #     # STABL with cross-validation - STABL handles its own hyperparameter optimization
+    #     logit_lasso = LogisticRegression(
+    #         penalty="l1",
+    #         solver="saga",
+    #         max_iter=10000,  # Increased for better convergence
+    #         fit_intercept=True,  # Explicitly set
+    #         tol=1e-4,  # Relaxed tolerance for better convergence
+    #         class_weight="balanced",  # Handle class imbalance
+    #         random_state=random_state
+    #     )
+    #     model = Stabl(
+    #         base_estimator=clone(logit_lasso),
+    #         lambda_grid={"C": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
+    #         n_lambda=10,
+    #         artificial_type="random_permutation",
+    #         artificial_proportion=1,
+    #         n_bootstraps=500,
+    #         random_state=random_state,
+    #         verbose=1
+    #     )
+    #     return model, logit_lasso
+    # elif model_type == "elasticnet":
+    if model_type == "elasticnet":
         # Use LogisticRegression with elasticnet penalty
         model = LogisticRegression(
             penalty="elasticnet",

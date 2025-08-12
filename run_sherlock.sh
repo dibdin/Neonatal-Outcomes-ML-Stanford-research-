@@ -35,16 +35,16 @@ cat <<EOF > $JOB_SCRIPT
 module load $PYTHON_MODULE
 
 # Install required packages if needed
-pip install --user pandas numpy scikit-learn matplotlib seaborn adjustText stabl
+pip3 install --user pandas numpy scikit-learn matplotlib seaborn adjustText  # stabl commented out due to long runtime
 
 echo "🚀 Starting COMPREHENSIVE serum biomarkers analysis..."
 echo "📊 Using configuration from src/config.py"
 echo "🔧 N_REPEATS: 100, TEST_SIZE: 0.2, PRETERM_CUTOFF: 37"
-echo "🤖 Model Types: Lasso CV, ElasticNet CV, STABL"
+echo "🤖 Model Types: Lasso CV, ElasticNet CV"  # STABL commented out due to long runtime
 
 # Step 1: Run gestational age analysis (using config values)
 echo "📊 Step 1: Running gestational age analysis..."
-python main.py gestational_age
+python3 main.py gestational_age
 echo "✅ Gestational age analysis completed"
 
 # Step 2: Run birth weight analysis (using config values)

@@ -49,7 +49,7 @@ except ImportError:
 
 DATA_OPTION_LABELS = {1: 'both_samples', 2: 'heel_all', 3: 'cord_all'}
 
-stabl_heel_biomarker_zero_feature_runs = []
+    # stabl_heel_biomarker_zero_feature_runs = []  # STABL commented out due to long runtime
 
 def run_single_model(model_name, data_type, dataset_type, model_type, data_option=1, data_option_label='both_samples', target_type='gestational_age'):
     """
@@ -85,7 +85,7 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
     all_classification_coefficients = []  # Collect coefficients for classification
 
     # --- REGRESSION TASK (GA prediction) ---
-    n_stabl_regression_skipped = 0
+    # n_stabl_regression_skipped = 0  # STABL commented out due to long runtime
     for i in range(N_REPEATS):
         try:
             # Split data
@@ -110,40 +110,44 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 X_test_scaled = pd.DataFrame(X_test_processed, columns=X_train_scaled.columns, index=X_test.index)
             # Get and train model
             model, base_estimator = get_model(model_type)
-            if model_type == 'stabl':
-                from sklearn.pipeline import Pipeline
-                from sklearn.feature_selection import VarianceThreshold
-                from stabl.preprocessing import LowInfoFilter
-                from sklearn.impute import SimpleImputer
-                # Build preprocessing pipeline as in the official STABL notebook
-                preprocessing = Pipeline([
-                    ("variance_threshold", VarianceThreshold(threshold=0)),
-                    ("low_info_filter", LowInfoFilter(max_nan_fraction=0.2)),
-                    ("imputer", SimpleImputer(strategy="median")),
-                    ("std", StandardScaler()),
-                ])
-                X_train_processed = preprocessing.fit_transform(X_train)
-                X_test_processed = preprocessing.transform(X_test)
-                # Convert back to DataFrame for compatibility
-                X_train_scaled = pd.DataFrame(X_train_processed, columns=X_train.columns[preprocessing.named_steps['variance_threshold'].get_support()][preprocessing.named_steps['low_info_filter'].get_support()], index=X_train.index)
-                X_test_scaled = pd.DataFrame(X_test_processed, columns=X_train_scaled.columns, index=X_test.index)
-                print('\n[DEBUG] STABL input X_train_scaled shape:', X_train_scaled.shape)
-                print('[DEBUG] First 5 rows of X_train_scaled:\n', X_train_scaled.head())
-                variances = X_train_scaled.var(axis=0)
-                print('[DEBUG] Feature variances:')
-                print('  Number of features with zero variance:', (variances == 0).sum())
-                print('  Min variance:', variances.min())
-                print('  Max variance:', variances.max())
-                print('  Mean variance:', variances.mean())
-                print('[DEBUG] y_train stats: min', y_train.min(), 'max', y_train.max(), 'mean', y_train.mean(), 'std', y_train.std())
-                trained_model, base_estimator, selected_feature_names = train_model(X_train_scaled, y_train, model, base_estimator)
-                n_selected = len(selected_feature_names) if selected_feature_names is not None else 0
-                print(f"[STABL] Number of features selected for {model_name} ({data_type}) on {dataset_type}: {n_selected}")
-                print(f"[STABL] Selected features: {list(selected_feature_names) if selected_feature_names is not None else 'None'}")
-                if base_estimator is not None and hasattr(base_estimator, 'coef_'):
-                    print(f"[STABL] Base estimator coefficients: {base_estimator.coef_}")
-                y_preds = predict_model(model, X_test_scaled, base_estimator)
-            else:
+            # STABL code commented out due to long runtime
+            # if model_type == 'stabl':
+            #     from sklearn.pipeline import Pipeline
+            #     from sklearn.feature_selection import VarianceThreshold
+            #     from stabl.preprocessing import LowInfoFilter
+            #     from sklearn.impute import SimpleImputer
+            #     # Build preprocessing pipeline as in the official STABL notebook
+            #     preprocessing = Pipeline([
+            #         ("variance_threshold", VarianceThreshold(threshold=0)),
+            #         ("low_info_filter", LowInfoFilter(max_nan_fraction=0.2)),
+            #         ("imputer", SimpleImputer(strategy="median")),
+            #         ("std", StandardScaler()),
+            #     ])
+            #     X_train_processed = preprocessing.fit_transform(X_train)
+            #     X_test_processed = preprocessing.transform(X_test)
+            #     # Convert back to DataFrame for compatibility
+            #     X_train_scaled = pd.DataFrame(X_train_processed, columns=X_train.columns[preprocessing.named_steps['variance_threshold'].get_support()][preprocessing.named_steps['low_info_filter'].get_support()], index=X_train.index)
+            #     X_test_scaled = pd.DataFrame(X_test_processed, columns=X_train_scaled.columns, index=X_test.index)
+            #     print('\n[DEBUG] STABL input X_train_scaled shape:', X_train_scaled.shape)
+            #     print('[DEBUG] First 5 rows of X_train_scaled:\n', X_train_scaled.head())
+            #     variances = X_train_scaled.var(axis=0)
+            #     print('[DEBUG] Feature variances:')
+            #     print('  Number of features with zero variance:', (variances == 0).sum())
+            #     print('  Min variance:', variances.min())
+            #     print('  Max variance:', variances.max())
+            #     print('  Mean variance:', variances.mean())
+            #     print('[DEBUG] y_train stats: min', y_train.min(), 'max', y_train.max(), 'mean', y_train.mean(), 'std', y_train.std())
+            #     trained_model, base_estimator, selected_feature_names = train_model(X_train_scaled, y_train, model, base_estimator)
+            #     n_selected = len(selected_feature_names) if selected_feature_names is not None else 0
+            #     print(f"[STABL] Number of features selected for {model_name} ({data_type}) on {dataset_type}: {n_selected}")
+            #     print(f"[STABL] Selected features: {list(selected_feature_names) if selected_feature_names is not None else 'None'}")
+            #     if base_estimator is not None and hasattr(base_estimator, 'coef_'):
+            #         print(f"[STABL] Base estimator coefficients: {base_estimator.coef_}")
+            #     y_preds = predict_model(model, X_test_scaled, base_estimator)
+            # else:
+            # For CV models, preprocessing is handled in the pipeline
+            # For non-CV models, apply preprocessing manually
+            if model_type in ['lasso_cv', 'elasticnet_cv']:
                 # For CV models, preprocessing is handled in the pipeline
                 # For non-CV models, apply preprocessing manually
                 if model_type in ['lasso_cv', 'elasticnet_cv']:
@@ -320,38 +324,41 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 class_model, class_base_estimator = get_classification_model(model_type)
                 
                 # Train classification model
-                if model_type == 'stabl':
-                    # Apply the same preprocessing pipeline for STABL classification
-                    from sklearn.pipeline import Pipeline
-                    from sklearn.feature_selection import VarianceThreshold
-                    from stabl.preprocessing import LowInfoFilter
-                    from sklearn.impute import SimpleImputer
-                    
-                    # Build preprocessing pipeline as specified
-                    preprocessing = Pipeline([
-                        ("variance_threshold", VarianceThreshold(threshold=0)),  # Removing 0 variance features
-                        ("low_info_filter", LowInfoFilter(max_nan_fraction=0.2)),
-                        ("imputer", SimpleImputer(strategy="median")),  # Imputing missing values with median
-                        ("std", StandardScaler())  # Z-scoring features
-                    ])
-                    
-                    # Apply preprocessing to classification data
-                    X_train_class_processed = preprocessing.fit_transform(X_train)
-                    X_test_class_processed = preprocessing.transform(X_test)
-                    
-                    # Convert back to DataFrame for compatibility
-                    X_train_class_scaled = pd.DataFrame(X_train_class_processed, 
-                        columns=X_train.columns[preprocessing.named_steps['variance_threshold'].get_support()][preprocessing.named_steps['low_info_filter'].get_support()], 
-                        index=X_train.index)
-                    X_test_class_scaled = pd.DataFrame(X_test_class_processed, 
-                        columns=X_train_class_scaled.columns, 
-                        index=X_test.index)
-                    
-                    print(f'\n[DEBUG] STABL classification input X_train_class_scaled shape:', X_train_class_scaled.shape)
-                    
-                    trained_class_model, class_base_estimator, class_selected_feature_names = train_model(X_train_class_scaled, y_train_binary, class_model, class_base_estimator)
-                    y_class_preds = predict_model(class_model, X_test_class_scaled, class_base_estimator)
-                else:
+                # STABL classification code commented out due to long runtime
+                # if model_type == 'stabl':
+                #     # Apply the same preprocessing pipeline for STABL classification
+                #     from sklearn.pipeline import Pipeline
+                #     from sklearn.feature_selection import VarianceThreshold
+                #     from stabl.preprocessing import LowInfoFilter
+                #     from sklearn.impute import SimpleImputer
+                #     
+                #     # Build preprocessing pipeline as specified
+                #     preprocessing = Pipeline([
+                #         ("variance_threshold", VarianceThreshold(threshold=0)),  # Removing 0 variance features
+                #         ("low_info_filter", LowInfoFilter(max_nan_fraction=0.2)),
+                #         ("imputer", SimpleImputer(strategy="median")),  # Imputing missing values with median
+                #         ("std", StandardScaler())  # Z-scoring features
+                #     ])
+                #     
+                #     # Apply preprocessing to classification data
+                #     X_train_class_processed = preprocessing.fit_transform(X_train)
+                #     X_test_class_processed = preprocessing.transform(X_test)
+                #     
+                #     # Convert back to DataFrame for compatibility
+                #     X_train_class_scaled = pd.DataFrame(X_train_class_processed, 
+                #         columns=X_train.columns[preprocessing.named_steps['variance_threshold'].get_support()][preprocessing.named_steps['low_info_filter'].get_support()], 
+                #         index=X_train.index)
+                #     X_test_class_scaled = pd.DataFrame(X_test_class_processed, 
+                #         columns=X_train_class_scaled.columns, 
+                #         index=X_test.index)
+                #     
+                #     print(f'\n[DEBUG] STABL classification input X_train_class_scaled shape:', X_train_class_scaled.shape)
+                #     
+                #     trained_class_model, class_base_estimator, class_selected_feature_names = train_model(X_train_class_scaled, y_train_binary, class_model, class_base_estimator)
+                #     y_class_preds = predict_model(class_model, X_test_class_scaled, class_base_estimator)
+                # else:
+                # For non-STABL models
+                if model_type in ['lasso_cv', 'elasticnet_cv']:
                     trained_class_model, _, class_selected_feature_names = train_model(X_train_scaled, y_train_binary, class_model, None)
                     y_class_preds = predict_model(trained_class_model, X_test_scaled, None)
                 
@@ -463,19 +470,22 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 save_all_as_pickle(class_model_outputs, class_filename)
                 
                 print(f"  Run {i+1}: MAE = {mae:.3f}, RMSE = {rmse:.3f}, AUC = {auc:.3f}")
-            else:
-                print(f"  Run {i+1}: Skipping classification for STABL model.")
+            # STABL classification skipping commented out due to long runtime
+            # else:
+            #     print(f"  Run {i+1}: Skipping classification for STABL model.")
         except RuntimeError as e:
-            if model_type == 'stabl' and 'zero features' in str(e).lower():
-                print(f"[STABL] Skipping run {i+1} for {model_name} ({data_type}) on {dataset_type}: zero features selected.")
-                n_stabl_regression_skipped += 1
-                continue
-            else:
-                raise
+            # STABL error handling commented out due to long runtime
+            # if model_type == 'stabl' and 'zero features' in str(e).lower():
+            #     print(f"[STABL] Skipping run {i+1} for {model_name} ({data_type}) on {dataset_type}: zero features selected.")
+            #     n_stabl_regression_skipped += 1
+            #     continue
+            # else:
+            raise
     
-    # Print summary of skipped STABL runs
-    if model_type == 'stabl':
-        print(f"\n[SUMMARY] STABL regression: Zero features selected in {n_stabl_regression_skipped} out of {N_REPEATS} runs for {model_name} ({data_type}) on {dataset_type}.\n")
+    # STABL summary commented out due to long runtime
+    # # Print summary of skipped STABL runs
+    # if model_type == 'stabl':
+    #     print(f"\n[SUMMARY] STABL regression: Zero features selected in {n_stabl_regression_skipped} out of {N_REPEATS} runs for {model_name} ({data_type}) on {dataset_type}.\n")
     
     # Calculate summary statistics for regression
     mae_mean = np.mean(maes)
@@ -687,11 +697,11 @@ def main(target_type='gestational_age'):
     
     # Configuration
     dataset_types = ['heel', 'cord']
-    model_types = ['lasso_cv', 'elasticnet_cv', 'stabl']
+    model_types = ['lasso_cv', 'elasticnet_cv']  # 'stabl' commented out due to long runtime
     model_configs = [
-        {'name': 'Clinical', 'data_type': 'clinical', 'allowed_models': ['lasso_cv', 'elasticnet_cv', 'stabl']},
-        {'name': 'Biomarker', 'data_type': 'biomarker', 'allowed_models': ['lasso_cv', 'elasticnet_cv', 'stabl']},
-        {'name': 'Combined', 'data_type': 'combined', 'allowed_models': ['lasso_cv', 'elasticnet_cv', 'stabl']}
+        {'name': 'Clinical', 'data_type': 'clinical', 'allowed_models': ['lasso_cv', 'elasticnet_cv']},  # 'stabl' commented out
+        {'name': 'Biomarker', 'data_type': 'biomarker', 'allowed_models': ['lasso_cv', 'elasticnet_cv']},  # 'stabl' commented out
+        {'name': 'Combined', 'data_type': 'combined', 'allowed_models': ['lasso_cv', 'elasticnet_cv']}  # 'stabl' commented out
     ]
     
     print(f"\n{'='*80}")
