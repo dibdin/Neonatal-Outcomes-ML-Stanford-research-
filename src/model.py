@@ -47,24 +47,22 @@ def get_model(model_type):
     Raises:
         ValueError: If model_type is not recognized
     """
-    # STABL code commented out due to long runtime
-    # if model_type == "stabl":
-    #     # STABL with cross-validation - STABL handles its own hyperparameter optimization
-    #     lasso = Lasso(max_iter=10000, fit_intercept=True, tol=1e-4, random_state=random_state)
-    #     base_estimator = clone(lasso)
-    #     stabl = Stabl(
-    #         base_estimator=base_estimator,
-    #         lambda_grid={"alpha": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
-    #         n_lambda=10,
-    #         artificial_type="random_permutation",
-    #         artificial_proportion=1,
-    #         n_bootstraps=500,
-    #         random_state=random_state,
-    #         verbose=1
-    #     )
-    #     return stabl, base_estimator
-    # elif model_type == "elasticnet":
-    if model_type == "elasticnet":
+    if model_type == "stabl":
+        # STABL with cross-validation - STABL handles its own hyperparameter optimization
+        lasso = Lasso(max_iter=20000, fit_intercept=True, tol=1e-3, random_state=random_state)
+        base_estimator = clone(lasso)
+        stabl = Stabl(
+            base_estimator=base_estimator,
+            lambda_grid={"alpha": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
+            n_lambda=10,
+            artificial_type="random_permutation",
+            artificial_proportion=1,
+            n_bootstraps=500,
+            random_state=random_state,
+            verbose=1
+        )
+        return stabl, base_estimator
+    elif model_type == "elasticnet":
         return ElasticNet(alpha=0.1), None
     elif model_type == "lasso":
         return Lasso(alpha=0.1, max_iter=2000), None
@@ -80,9 +78,9 @@ def get_model(model_type):
             ('imputer', KNNImputer(n_neighbors=5, weights='uniform')),
             ('scaler', StandardScaler()),
             ('elasticnet', ElasticNet(
-                max_iter=10000,  # Increased for better convergence
+                max_iter=20000,  # Increased for better convergence
                 fit_intercept=True,  # Explicitly set
-                tol=1e-4,  # Relaxed tolerance for better convergence
+                tol=1e-3,  # Relaxed tolerance for better convergence
                 random_state=random_state
             ))
         ])
@@ -107,9 +105,9 @@ def get_model(model_type):
             ('imputer', KNNImputer(n_neighbors=5, weights='uniform')),
             ('scaler', StandardScaler()),
             ('lasso', Lasso(
-                max_iter=10000,  # Increased for better convergence
+                max_iter=20000,  # Increased for better convergence
                 fit_intercept=True,  # Explicitly set
-                tol=1e-4,  # Relaxed tolerance for better convergence
+                tol=1e-3,  # Relaxed tolerance for better convergence
                 random_state=random_state
             ))
         ])
@@ -135,31 +133,29 @@ def get_classification_model(model_type):
     Returns:
         tuple: (model, base_estimator) where base_estimator is None for non-STABL models
     """
-    # STABL classification code commented out due to long runtime
-    # if model_type == "stabl":
-    #     # STABL with cross-validation - STABL handles its own hyperparameter optimization
-    #     logit_lasso = LogisticRegression(
-    #         penalty="l1",
-    #         solver="saga",
-    #         max_iter=10000,  # Increased for better convergence
-    #         fit_intercept=True,  # Explicitly set
-    #         tol=1e-4,  # Relaxed tolerance for better convergence
-    #         class_weight="balanced",  # Handle class imbalance
-    #         random_state=random_state
-    #     )
-    #     model = Stabl(
-    #         base_estimator=clone(logit_lasso),
-    #         lambda_grid={"C": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
-    #         n_lambda=10,
-    #         artificial_type="random_permutation",
-    #         artificial_proportion=1,
-    #         n_bootstraps=500,
-    #         random_state=random_state,
-    #         verbose=1
-    #     )
-    #     return model, logit_lasso
-    # elif model_type == "elasticnet":
-    if model_type == "elasticnet":
+    if model_type == "stabl":
+        # STABL with cross-validation - STABL handles its own hyperparameter optimization
+        logit_lasso = LogisticRegression(
+            penalty="l1",
+            solver="saga",
+            max_iter=20000,  # Increased for better convergence
+            fit_intercept=True,  # Explicitly set
+            tol=1e-3,  # Relaxed tolerance for better convergence
+            class_weight="balanced",  # Handle class imbalance
+            random_state=random_state
+        )
+        model = Stabl(
+            base_estimator=clone(logit_lasso),
+            lambda_grid={"C": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]},
+            n_lambda=10,
+            artificial_type="random_permutation",
+            artificial_proportion=1,
+            n_bootstraps=500,
+            random_state=random_state,
+            verbose=1
+        )
+        return model, logit_lasso
+    elif model_type == "elasticnet":
         # Use LogisticRegression with elasticnet penalty
         model = LogisticRegression(
             penalty="elasticnet",
@@ -184,9 +180,9 @@ def get_classification_model(model_type):
             ('logisticregression', LogisticRegression(
                 penalty="elasticnet",
                 solver="saga",
-                max_iter=10000,  # Increased for better convergence
+                max_iter=5000,  # Increased for better convergence
                 fit_intercept=True,  # Explicitly set
-                tol=1e-4,  # Relaxed tolerance for better convergence
+                tol=1e-3,  # Relaxed tolerance for better convergence
                 class_weight="balanced",  # Handle class imbalance
                 random_state=42
             ))
@@ -195,7 +191,7 @@ def get_classification_model(model_type):
         cv_model = GridSearchCV(
             pipeline,
             param_grid,
-            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),  # Increased CV folds
+            cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42),  # Reduced CV folds to speed up
             scoring='roc_auc',
             n_jobs=1,  # Single job to prevent hanging completely
             verbose=0
@@ -225,9 +221,9 @@ def get_classification_model(model_type):
             ('logisticregression', LogisticRegression(
                 penalty="l1",
                 solver="saga",
-                max_iter=10000,  # Increased for better convergence
+                max_iter=20000,  # Increased for better convergence
                 fit_intercept=True,  # Explicitly set
-                tol=1e-4,  # Relaxed tolerance for better convergence
+                tol=1e-3,  # Relaxed tolerance for better convergence
                 class_weight="balanced",  # Handle class imbalance
                 random_state=42
             ))
@@ -236,7 +232,7 @@ def get_classification_model(model_type):
         cv_model = GridSearchCV(
             pipeline, 
             param_grid, 
-            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),  # Use stratification for classification
+            cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42),  # Reduced CV folds to speed up
             scoring='roc_auc',
             n_jobs=1,  # Single job to prevent hanging completely
             verbose=0
@@ -261,7 +257,10 @@ def train_model(X_train, y_train, model, base_estimator=None):
     """
     if base_estimator is None:
         # Regular model like ElasticNet or Lasso
+        print(f"    DEBUG - Training model with shape: {X_train.shape}")
+        print(f"    DEBUG - Model type: {type(model)}")
         model.fit(X_train, y_train)
+        print(f"    DEBUG - Model training completed")
         return model, None, X_train.columns
     else:
         # STABL feature selection, train base estimator (e.g. ElasticNet)
