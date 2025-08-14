@@ -92,7 +92,7 @@ def get_model(model_type):
             param_grid, 
             cv=KFold(n_splits=5, shuffle=True, random_state=random_state),  # 5-fold CV for regression
             scoring='neg_mean_squared_error',
-            n_jobs=-1,
+            n_jobs=4,  # Fixed number of jobs to prevent hanging
             verbose=0
         )
         return cv_model, None
@@ -119,7 +119,7 @@ def get_model(model_type):
             param_grid, 
             cv=KFold(n_splits=5, shuffle=True, random_state=random_state),  # 5-fold CV for regression
             scoring='neg_mean_squared_error',
-            n_jobs=-1,
+            n_jobs=4,  # Fixed number of jobs to prevent hanging
             verbose=0
         )
         return cv_model, None
@@ -197,7 +197,7 @@ def get_classification_model(model_type):
             param_grid,
             cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),  # Increased CV folds
             scoring='roc_auc',
-            n_jobs=-1,
+            n_jobs=4,  # Fixed number of jobs to prevent hanging
             verbose=0
         )
         return cv_model, None
@@ -238,7 +238,7 @@ def get_classification_model(model_type):
             param_grid, 
             cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),  # Use stratification for classification
             scoring='roc_auc',
-            n_jobs=-1,
+            n_jobs=4,  # Fixed number of jobs to prevent hanging
             verbose=0
         )
         return cv_model, None
