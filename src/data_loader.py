@@ -18,6 +18,205 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import KNNImputer
 from itertools import combinations
+import os
+import tempfile
+from joblib import Parallel, delayed
+import math
+
+
+def create_interaction_chunk(chunk_data, feature_names, chunk_id, output_dir):
+    """
+    Create pairwise interactions for a chunk of features.
+    
+    Args:
+        chunk_data (pd.DataFrame): DataFrame containing the chunk of features
+        feature_names (list): List of feature names in this chunk
+        chunk_id (int): Unique identifier for this chunk
+        output_dir (str): Directory to save the chunk file
+        
+    Returns:
+        str: Path to the saved chunk file
+    """
+    interactions = []
+    interaction_names = []
+    
+    # Create all pairwise interactions within this chunk
+    for i, col1 in enumerate(feature_names):
+        for j, col2 in enumerate(feature_names[i+1:], i+1):
+            interaction_name = f"{col1}_x_{col2}"
+            interaction_data = chunk_data[col1] * chunk_data[col2]
+            interactions.append(interaction_data)
+            interaction_names.append(interaction_name)
+    
+    # Create DataFrame with interactions
+    if interactions:
+        interaction_df = pd.DataFrame(dict(zip(interaction_names, interactions)))
+        
+        # Save to Parquet file
+        chunk_file = os.path.join(output_dir, f"interactions_chunk_{chunk_id:04d}.parquet")
+        interaction_df.to_parquet(chunk_file, index=False)
+        
+        print(f"   ✅ Chunk {chunk_id}: Created {len(interactions)} interactions, saved to {chunk_file}")
+        return chunk_file
+    else:
+        print(f"   ⚠️  Chunk {chunk_id}: No interactions created")
+        return None
+
+
+def create_cross_chunk_interactions(chunk1_data, chunk1_names, chunk2_data, chunk2_names, 
+                                  chunk_id1, chunk_id2, output_dir):
+    """
+    Create pairwise interactions between two different chunks of features.
+    
+    Args:
+        chunk1_data (pd.DataFrame): First chunk of features
+        chunk1_names (list): Names of features in first chunk
+        chunk2_data (pd.DataFrame): Second chunk of features  
+        chunk2_names (list): Names of features in second chunk
+        chunk_id1 (int): ID of first chunk
+        chunk_id2 (int): ID of second chunk
+        output_dir (str): Directory to save the chunk file
+        
+    Returns:
+        str: Path to the saved chunk file
+    """
+    interactions = []
+    interaction_names = []
+    
+    # Create all pairwise interactions between the two chunks
+    for col1 in chunk1_names:
+        for col2 in chunk2_names:
+            interaction_name = f"{col1}_x_{col2}"
+            interaction_data = chunk1_data[col1] * chunk2_data[col2]
+            interactions.append(interaction_data)
+            interaction_names.append(interaction_name)
+    
+    # Create DataFrame with interactions
+    if interactions:
+        interaction_df = pd.DataFrame(dict(zip(interaction_names, interactions)))
+        
+        # Save to Parquet file
+        chunk_file = os.path.join(output_dir, f"interactions_cross_{chunk_id1:04d}_{chunk_id2:04d}.parquet")
+        interaction_df.to_parquet(chunk_file, index=False)
+        
+        print(f"   ✅ Cross-chunk {chunk_id1}-{chunk_id2}: Created {len(interactions)} interactions, saved to {chunk_file}")
+        return chunk_file
+    else:
+        print(f"   ⚠️  Cross-chunk {chunk_id1}-{chunk_id2}: No interactions created")
+        return None
+
+
+def create_parallel_pairwise_interactions(data_df, feature_cols, chunk_size=300, n_jobs=-1, 
+                                        output_dir=None, recombine=True):
+    """
+    Create pairwise interactions in parallel with memory-safe chunking.
+    
+    Args:
+        data_df (pd.DataFrame): Input DataFrame with features
+        feature_cols (list): List of feature column names
+        chunk_size (int): Number of features per chunk (default: 300)
+        n_jobs (int): Number of parallel jobs (-1 for all cores)
+        output_dir (str): Directory to save chunk files (None for temp directory)
+        recombine (bool): Whether to recombine all chunks into single DataFrame
+        
+    Returns:
+        pd.DataFrame: DataFrame with original features + interactions (if recombine=True)
+        or list of chunk file paths (if recombine=False)
+    """
+    print(f"🔍 PARALLEL INTERACTION GENERATION: {len(feature_cols)} features, chunk_size={chunk_size}")
+    
+    # Create output directory
+    if output_dir is None:
+        output_dir = tempfile.mkdtemp(prefix="interactions_")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Split features into chunks
+    n_features = len(feature_cols)
+    n_chunks = math.ceil(n_features / chunk_size)
+    chunks = []
+    
+    for i in range(n_chunks):
+        start_idx = i * chunk_size
+        end_idx = min((i + 1) * chunk_size, n_features)
+        chunk_features = feature_cols[start_idx:end_idx]
+        chunk_data = data_df[chunk_features].copy()
+        chunks.append((chunk_data, chunk_features, i))
+    
+    print(f"   📦 Split into {n_chunks} chunks of ~{chunk_size} features each")
+    
+    # Process chunks in parallel
+    chunk_files = []
+    
+    # 1. Create interactions within each chunk
+    print(f"   🔄 Creating interactions within chunks...")
+    within_chunk_files = Parallel(n_jobs=n_jobs, verbose=1)(
+        delayed(create_interaction_chunk)(chunk_data, chunk_features, chunk_id, output_dir)
+        for chunk_data, chunk_features, chunk_id in chunks
+    )
+    chunk_files.extend([f for f in within_chunk_files if f is not None])
+    
+    # 2. Create interactions between different chunks
+    print(f"   🔄 Creating cross-chunk interactions...")
+    cross_chunk_files = []
+    
+    for i in range(n_chunks):
+        for j in range(i + 1, n_chunks):  # Only process each pair once
+            chunk1_data, chunk1_features, chunk1_id = chunks[i]
+            chunk2_data, chunk2_features, chunk2_id = chunks[j]
+            
+            cross_file = create_cross_chunk_interactions(
+                chunk1_data, chunk1_features, 
+                chunk2_data, chunk2_features,
+                chunk1_id, chunk2_id, output_dir
+            )
+            if cross_file:
+                cross_chunk_files.append(cross_file)
+    
+    chunk_files.extend(cross_chunk_files)
+    
+    # Calculate total interactions
+    total_within = sum(len(list(combinations(chunk_features, 2))) for _, chunk_features, _ in chunks)
+    total_cross = sum(len(chunk1_features) * len(chunk2_features) 
+                     for i in range(n_chunks) 
+                     for j in range(i + 1, n_chunks)
+                     for _, chunk1_features, _ in [chunks[i]]
+                     for _, chunk2_features, _ in [chunks[j]])
+    total_interactions = total_within + total_cross
+    
+    print(f"   ✅ Created {total_interactions} total interactions across {len(chunk_files)} files")
+    
+    if recombine:
+        print(f"   🔄 Recombining all chunks into single DataFrame...")
+        # Read and combine all chunk files
+        interaction_dfs = []
+        for chunk_file in chunk_files:
+            if os.path.exists(chunk_file):
+                df = pd.read_parquet(chunk_file)
+                interaction_dfs.append(df)
+        
+        if interaction_dfs:
+            # Combine all interaction DataFrames
+            combined_interactions = pd.concat(interaction_dfs, axis=1)
+            
+            # Combine with original features
+            result_df = pd.concat([data_df[feature_cols], combined_interactions], axis=1)
+            
+            print(f"   ✅ Final DataFrame: {len(feature_cols)} original + {len(combined_interactions.columns)} interaction features")
+            
+            # Clean up chunk files
+            for chunk_file in chunk_files:
+                try:
+                    os.remove(chunk_file)
+                except:
+                    pass
+            
+            return result_df
+        else:
+            print(f"   ⚠️  No interaction files found, returning original features")
+            return data_df[feature_cols]
+    else:
+        print(f"   📁 Chunk files saved to: {output_dir}")
+        return chunk_files
 
 
 def load_and_process_data(dataset_type='cord', model_type='biomarker', data_option=1, dropna=False, random_state=48, include_all_biomarkers=True, target_type='gestational_age', return_dataframe=False):
@@ -131,23 +330,25 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         # Extract base clinical features
         X_clinical = data_df[clinical_cols].copy()
         
-        # Create pairwise interactions for all clinical features
+        # Create pairwise interactions using parallel processing
         print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(clinical_cols)} clinical features...")
-        interaction_features = []
-        for col1, col2 in combinations(clinical_cols, 2):
-            interaction_name = f"{col1}_x_{col2}"
-            X_clinical[interaction_name] = X_clinical[col1] * X_clinical[col2]
-            interaction_features.append(interaction_name)
-            
-        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} clinical interactions: {interaction_features}")
-        feature_cols = clinical_cols + interaction_features
+        X_with_interactions = create_parallel_pairwise_interactions(
+            data_df=X_clinical,
+            feature_cols=clinical_cols,
+            chunk_size=min(300, len(clinical_cols)),  # Use smaller chunks for clinical features
+            n_jobs=-1,
+            recombine=True
+        )
+        
+        feature_cols = list(X_with_interactions.columns)
+        print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(clinical_cols)} clinical interactions. Total features: {len(feature_cols)}")
         
     elif model_type == 'biomarker':
         # Biomarker features (columns 30-141)
         biomarker_cols = df.columns[30:141].tolist()
         print(f"🔍 PREPROCESSING STEP 3: Selected {len(biomarker_cols)} biomarker features")
         
-        # Create pairwise interactions for all biomarkers
+        # Create pairwise interactions using parallel processing
         print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(biomarker_cols)} biomarkers...")
         X_biomarker = data_df[biomarker_cols].copy()
         
@@ -156,23 +357,16 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         n_interactions = (n_biomarkers * (n_biomarkers - 1)) // 2
         print(f"   Will create {n_interactions} pairwise interactions...")
         
-        # Create pairwise interactions
-        interaction_features = []
-        interaction_count = 0
+        X_with_interactions = create_parallel_pairwise_interactions(
+            data_df=X_biomarker,
+            feature_cols=biomarker_cols,
+            chunk_size=300,  # Optimal chunk size for biomarker features
+            n_jobs=-1,
+            recombine=True
+        )
         
-        for i, col1 in enumerate(biomarker_cols):
-            for j, col2 in enumerate(biomarker_cols[i+1:], i+1):  # Start from i+1 to avoid duplicates
-                interaction_name = f"{col1}_x_{col2}"
-                X_biomarker[interaction_name] = X_biomarker[col1] * X_biomarker[col2]
-                interaction_features.append(interaction_name)
-                interaction_count += 1
-                
-                # Progress update every 1000 interactions
-                if interaction_count % 1000 == 0:
-                    print(f"   Created {interaction_count}/{n_interactions} interactions...")
-        
-        feature_cols = biomarker_cols + interaction_features
-        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} biomarker interactions. Total features: {len(feature_cols)}")
+        feature_cols = list(X_with_interactions.columns)
+        print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(biomarker_cols)} biomarker interactions. Total features: {len(feature_cols)}")
         
     elif model_type == 'combined':
         # Both clinical and biomarker features
@@ -203,55 +397,36 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         n_interactions = (n_features * (n_features - 1)) // 2
         print(f"   Will create {n_interactions} pairwise interactions...")
         
-        # Create pairwise interactions for all features
-        interaction_features = []
-        interaction_count = 0
+        # Create pairwise interactions using parallel processing
+        print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(all_features)} total features...")
         
-        for i, col1 in enumerate(all_features):
-            for j, col2 in enumerate(all_features[i+1:], i+1):  # Start from i+1 to avoid duplicates
-                interaction_name = f"{col1}_x_{col2}"
-                
-                # Get the data for both features
-                if col1 in biomarker_cols:
-                    data1 = X_biomarker[col1]
-                else:
-                    data1 = X_clinical[col1]
-                    
-                if col2 in biomarker_cols:
-                    data2 = X_biomarker[col2]
-                else:
-                    data2 = X_clinical[col2]
-                
-                # Create interaction and add to appropriate dataframe
-                interaction_data = data1 * data2
-                if col1 in biomarker_cols or col2 in biomarker_cols:
-                    X_biomarker[interaction_name] = interaction_data
-                else:
-                    X_clinical[interaction_name] = interaction_data
-                
-                interaction_features.append(interaction_name)
-                interaction_count += 1
-                
-                # Progress update every 1000 interactions
-                if interaction_count % 1000 == 0:
-                    print(f"   Created {interaction_count}/{n_interactions} interactions...")
+        # Combine all features into single DataFrame for parallel processing
+        X_combined = pd.concat([X_biomarker, X_clinical], axis=1)
         
-        feature_cols = biomarker_cols + clinical_cols + interaction_features
-        print(f"✅ PREPROCESSING STEP 4: Created {len(interaction_features)} pairwise interactions. Total features: {len(feature_cols)}")
+        X_with_interactions = create_parallel_pairwise_interactions(
+            data_df=X_combined,
+            feature_cols=all_features,
+            chunk_size=300,  # Optimal chunk size for combined features
+            n_jobs=-1,
+            recombine=True
+        )
+        
+        feature_cols = list(X_with_interactions.columns)
+        print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(all_features)} pairwise interactions. Total features: {len(feature_cols)}")
 
     # Extract features and labels
     if model_type == 'clinical':
-        X = X_clinical
+        X = X_with_interactions
         y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
     elif model_type == 'biomarker':
-        X = X_biomarker
+        X = X_with_interactions
         y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
     elif model_type == 'combined':
         # For combined, we need to merge biomarker and clinical data
         y = data_df['birth_weight_kg'] if target_type == 'birth_weight' else data_df['gestational_age_weeks']
         
-        # Merge biomarker and clinical data
-        X = pd.concat([X_biomarker, X_clinical], axis=1)
+        # Use the parallel processed data with interactions
+        X = X_with_interactions
 
     # Print information about the features being included
     print(f"\n📊 DATASET SUMMARY:")
