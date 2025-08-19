@@ -863,7 +863,7 @@ def plot_biomarker_preterm_term_scatter(term_freq, preterm_freq, feature_names, 
     plt.close()
 
 
-def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, target_type='gestational_age', top_n=20):
+def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, target_type='gestational_age'):
     """
     Create a scatter plot comparing biomarker frequencies between heel and cord datasets.
     Args:
@@ -871,7 +871,8 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
         model_type (str): Type of model ('lasso', 'elasticnet', 'stabl')
         filename (str): Output filename for the plot
         target_type (str): Target type ('gestational_age' or 'birth_weight')
-        top_n (int or None): Number of top biomarkers to label (by total frequency). If None, label all above threshold.
+    Note:
+        Automatically labels the top 50% of biomarkers by total frequency (heel + cord).
     """
     import pandas as pd
     import numpy as np
@@ -936,11 +937,15 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
                c=high_freq['Total_Frequency'], cmap='viridis', s=120, alpha=0.9, 
                edgecolors='red', linewidth=2, zorder=5, label=f'Frequency > {threshold*100:.0f}%')
 
-    # D. Label only the top N biomarkers by total frequency, or all above threshold if top_n is None
-    if top_n is not None:
-        to_label = high_freq.head(top_n)
-    else:
-        to_label = high_freq
+    # D. Label the top 50% of biomarkers by total frequency
+    # Calculate how many biomarkers represent the top 50%
+    total_biomarkers = len(df)
+    top_50_percent_count = max(1, int(total_biomarkers * 0.5))  # At least 1 biomarker
+    
+    # Get the top 50% biomarkers by total frequency
+    to_label = df.head(top_50_percent_count)
+    
+    print(f"Labeling top {top_50_percent_count} biomarkers out of {total_biomarkers} total biomarkers (top 50%)")
 
     # B. Clean, publication-style labeling (no box, no arrow, small font, minimal offset)
     texts = []
