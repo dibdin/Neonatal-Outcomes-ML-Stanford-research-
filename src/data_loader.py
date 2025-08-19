@@ -319,13 +319,11 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     if model_type == 'clinical':
         # Clinical/demographic features - adjust based on target_type
         if target_type == 'gestational_age':
-            # Original: birth_weight, sex, multiple_birth (columns 145, 146, 158)
-            # After dropping date_transfusion (col 157), multiple_birth shifts from 158 to 157
-            clinical_cols = [df.columns[144], df.columns[145], df.columns[157]]  # birth_weight, sex, multiple_birth
+            # Extract specific clinical columns by name
+            clinical_cols = ['birth_weight_kg', 'sex', 'multiple_birth']
         else:  # target_type == 'birth_weight'
             # SGA pipeline: gestational_age_weeks, sex, multiple_birth (replace birth_weight with gestational_age_weeks)
-            # After dropping date_transfusion (col 157), multiple_birth shifts from 158 to 157
-            clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[157]]  # gestational_age_weeks, sex, multiple_birth
+            clinical_cols = ['gestational_age_weeks', 'sex', 'multiple_birth']
         
         print(f"🔍 PREPROCESSING STEP 3: Base clinical columns: {clinical_cols}")
         
@@ -386,13 +384,11 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         
         # Clinical features with interactions - adjust based on target_type
         if target_type == 'gestational_age':
-            # Original: birth_weight, sex, multiple_birth
-            # After dropping date_transfusion (col 157), multiple_birth shifts from 158 to 157
-            clinical_cols = [df.columns[144], df.columns[145], df.columns[157]]
+            # Extract specific clinical columns by name
+            clinical_cols = ['birth_weight_kg', 'sex', 'multiple_birth']
         else:  # target_type == 'birth_weight'
             # SGA pipeline: gestational_age_weeks, sex, multiple_birth
-            # After dropping date_transfusion (col 157), multiple_birth shifts from 158 to 157
-            clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[157]]
+            clinical_cols = ['gestational_age_weeks', 'sex', 'multiple_birth']
         
         print(f"🔍 PREPROCESSING STEP 3: Selected {len(biomarker_cols)} biomarker features and {len(clinical_cols)} clinical features")
         
