@@ -319,10 +319,12 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
     if model_type == 'clinical':
         # Clinical/demographic features - adjust based on target_type
         if target_type == 'gestational_age':
-            # Original: birth_weight, sex, multiple_birth (columns 145, 146, 159)
-            clinical_cols = [df.columns[144], df.columns[145], df.columns[157]]  # 0-indexed, so 145->144, 146->145, 159->158
+            # Original: birth_weight, sex, multiple_birth (columns 145, 146, 158)
+            # After dropping date_transfusion (col 157), multiple_birth shifts from 158 to 157
+            clinical_cols = [df.columns[144], df.columns[145], df.columns[157]]  # birth_weight, sex, multiple_birth
         else:  # target_type == 'birth_weight'
             # SGA pipeline: gestational_age_weeks, sex, multiple_birth (replace birth_weight with gestational_age_weeks)
+            # After dropping date_transfusion (col 157), multiple_birth shifts from 158 to 157
             clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[157]]  # gestational_age_weeks, sex, multiple_birth
         
         print(f"🔍 PREPROCESSING STEP 3: Base clinical columns: {clinical_cols}")
@@ -331,17 +333,22 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         X_clinical = data_df[clinical_cols].copy()
         
         # Create pairwise interactions using parallel processing
-        print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(clinical_cols)} clinical features...")
-        X_with_interactions = create_parallel_pairwise_interactions(
-            data_df=X_clinical,
-            feature_cols=clinical_cols,
-            chunk_size=min(300, len(clinical_cols)),  # Use smaller chunks for clinical features
-            n_jobs=-1,
-            recombine=True
-        )
+        # print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(clinical_cols)} clinical features...")
+        # X_with_interactions = create_parallel_pairwise_interactions(
+        #     data_df=X_clinical,
+        #     feature_cols=clinical_cols,
+        #     chunk_size=min(300, len(clinical_cols)),  # Use smaller chunks for clinical features
+        #     n_jobs=-1,
+        #     recombine=True
+        # )
+        # 
+        # feature_cols = list(X_with_interactions.columns)
+        # print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(clinical_cols)} clinical interactions. Total features: {len(feature_cols)}")
         
-        feature_cols = list(X_with_interactions.columns)
-        print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(clinical_cols)} clinical interactions. Total features: {len(feature_cols)}")
+        # For now, use only original features without interactions
+        X_with_interactions = X_clinical
+        feature_cols = clinical_cols
+        print(f"✅ PREPROCESSING STEP 4: Using {len(feature_cols)} clinical features (interactions disabled)")
         
     elif model_type == 'biomarker':
         # Biomarker features (columns 30-141)
@@ -349,24 +356,29 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         print(f"🔍 PREPROCESSING STEP 3: Selected {len(biomarker_cols)} biomarker features")
         
         # Create pairwise interactions using parallel processing
-        print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(biomarker_cols)} biomarkers...")
+        # print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(biomarker_cols)} biomarkers...")
         X_biomarker = data_df[biomarker_cols].copy()
         
         # Calculate number of interactions (n choose 2)
-        n_biomarkers = len(biomarker_cols)
-        n_interactions = (n_biomarkers * (n_biomarkers - 1)) // 2
-        print(f"   Will create {n_interactions} pairwise interactions...")
+        # n_biomarkers = len(biomarker_cols)
+        # n_interactions = (n_biomarkers * (n_biomarkers - 1)) // 2
+        # print(f"   Will create {n_interactions} pairwise interactions...")
+        # 
+        # X_with_interactions = create_parallel_pairwise_interactions(
+        #     data_df=X_biomarker,
+        #     feature_cols=biomarker_cols,
+        #     chunk_size=300,  # Optimal chunk size for biomarker features
+        #     n_jobs=-1,
+        #     recombine=True
+        # )
+        # 
+        # feature_cols = list(X_with_interactions.columns)
+        # print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(biomarker_cols)} biomarker interactions. Total features: {len(feature_cols)}")
         
-        X_with_interactions = create_parallel_pairwise_interactions(
-            data_df=X_biomarker,
-            feature_cols=biomarker_cols,
-            chunk_size=300,  # Optimal chunk size for biomarker features
-            n_jobs=-1,
-            recombine=True
-        )
-        
-        feature_cols = list(X_with_interactions.columns)
-        print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(biomarker_cols)} biomarker interactions. Total features: {len(feature_cols)}")
+        # For now, use only original features without interactions
+        X_with_interactions = X_biomarker
+        feature_cols = biomarker_cols
+        print(f"✅ PREPROCESSING STEP 4: Using {len(feature_cols)} biomarker features (interactions disabled)")
         
     elif model_type == 'combined':
         # Both clinical and biomarker features
@@ -374,11 +386,13 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         
         # Clinical features with interactions - adjust based on target_type
         if target_type == 'gestational_age':
-            # Original: birth_weight, sex, birth_order
-            clinical_cols = [df.columns[144], df.columns[145], df.columns[158]]
+            # Original: birth_weight, sex, multiple_birth
+            # After dropping date_transfusion (col 157), multiple_birth shifts from 158 to 157
+            clinical_cols = [df.columns[144], df.columns[145], df.columns[157]]
         else:  # target_type == 'birth_weight'
-            # SGA pipeline: gestational_age_weeks, sex, birth_order
-            clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[158]]
+            # SGA pipeline: gestational_age_weeks, sex, multiple_birth
+            # After dropping date_transfusion (col 157), multiple_birth shifts from 158 to 157
+            clinical_cols = ['gestational_age_weeks', df.columns[145], df.columns[157]]
         
         print(f"🔍 PREPROCESSING STEP 3: Selected {len(biomarker_cols)} biomarker features and {len(clinical_cols)} clinical features")
         
@@ -398,21 +412,27 @@ def load_and_process_data(dataset_type='cord', model_type='biomarker', data_opti
         print(f"   Will create {n_interactions} pairwise interactions...")
         
         # Create pairwise interactions using parallel processing
-        print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(all_features)} total features...")
+        # print(f"🔍 PREPROCESSING STEP 4: Creating pairwise interactions for {len(all_features)} total features...")
+        # 
+        # # Combine all features into single DataFrame for parallel processing
+        # X_combined = pd.concat([X_biomarker, X_clinical], axis=1)
+        # 
+        # X_with_interactions = create_parallel_pairwise_interactions(
+        #     data_df=X_combined,
+        #     feature_cols=all_features,
+        #     chunk_size=300,  # Optimal chunk size for combined features
+        #     n_jobs=-1,
+        #     recombine=True
+        # )
+        # 
+        # feature_cols = list(X_with_interactions.columns)
+        # print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(all_features)} pairwise interactions. Total features: {len(feature_cols)}")
         
-        # Combine all features into single DataFrame for parallel processing
+        # For now, use only original features without interactions
         X_combined = pd.concat([X_biomarker, X_clinical], axis=1)
-        
-        X_with_interactions = create_parallel_pairwise_interactions(
-            data_df=X_combined,
-            feature_cols=all_features,
-            chunk_size=300,  # Optimal chunk size for combined features
-            n_jobs=-1,
-            recombine=True
-        )
-        
-        feature_cols = list(X_with_interactions.columns)
-        print(f"✅ PREPROCESSING STEP 4: Created {len(feature_cols) - len(all_features)} pairwise interactions. Total features: {len(feature_cols)}")
+        X_with_interactions = X_combined
+        feature_cols = all_features
+        print(f"✅ PREPROCESSING STEP 4: Using {len(feature_cols)} combined features (interactions disabled)")
 
     # Extract features and labels
     if model_type == 'clinical':
