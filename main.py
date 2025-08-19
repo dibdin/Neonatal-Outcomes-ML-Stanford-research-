@@ -39,13 +39,9 @@ from src.utils import (
     plot_true_vs_predicted_scatter, plot_biomarker_frequency_heel_vs_cord,
     plot_feature_frequency, save_all_as_pickle
 )
-# Try to import Sherlock config first, fall back to regular config
-try:
-    from src.config_sherlock import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF
-    print("🔧 Using Sherlock config (N_REPEATS=10)")
-except ImportError:
-    from src.config import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF
-    print("🔧 Using regular config (N_REPEATS=100)")
+# Import regular config (100 runs)
+from src.config import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF
+print(f"🔧 Using regular config (N_REPEATS={N_REPEATS})")
 
 DATA_OPTION_LABELS = {1: 'both_samples', 2: 'heel_all', 3: 'cord_all'}
 
@@ -82,6 +78,12 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
     run_classification_predictions = []
     all_coefficients = []  # Collect coefficients for all runs
     all_classification_coefficients = []  # Collect coefficients for classification
+    
+    # Initialize lists to store subgroup metrics
+    preterm_metrics_list = []
+    term_metrics_list = []
+    sga_metrics_list = []
+    normal_metrics_list = []
 
     # --- REGRESSION TASK (GA prediction) ---
     n_stabl_regression_skipped = 0
@@ -138,6 +140,93 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
             mae = mean_absolute_error(y_test, y_preds)
             rmse = np.sqrt(mean_squared_error(y_test, y_preds))
             
+            # Calculate subgroup metrics
+            try:
+                from calculate_subgroup_metrics import calculate_subgroup_metrics
+                from src.sga_classification import create_sga_targets_intergrowth21
+                # Get gestational ages and birth weights for subgroup classification
+                # We need to load the original data to get gestational ages
+                from src.data_loader import load_and_process_data
+                
+                # Load the data to get gestational ages for subgroup classification
+                data, feature_names = load_and_process_data(
+                    data_option=data_option, 
+                    model_type=model_name.lower(), 
+                    target_type=target_type, 
+                    dropna=False
+                )
+                
+                # Get the test indices to extract corresponding gestational ages
+                from sklearn.model_selection import train_test_split
+                X_temp, y_temp = data
+                
+                # Split the data the same way to get test indices
+                X_train_temp, X_test_temp, y_train_temp, y_test_temp, train_indices, test_indices = train_test_split(
+                    X_temp, y_temp, test_size=0.2, random_state=42, return_indices=True
+                )
+                
+                # Load original data to get gestational ages
+                if data_option == 1:
+                    df = pd.read_csv('data/Bangladeshcombineddataset_both_samples.csv')
+                elif data_option == 2:
+                    df = pd.read_csv('data/BangladeshcombineddatasetJan252022.csv')
+                elif data_option == 3:
+                    df = pd.read_csv('data/BangladeshcombineddatasetJan252022.csv')
+                
+                # Drop date_transfusion if present
+                if 'date_transfusion' in df.columns:
+                    df = df.drop(columns=['date_transfusion'])
+                
+                # Filter for the appropriate dataset type
+                if data_option == 1:
+                    if dataset_type == 'heel':
+                        df = df[df['Source'] == 'HEEL']
+                    else:  # cord
+                        df = df[df['Source'] == 'CORD']
+                elif data_option == 2:
+                    df = df[df['Source'] == 'HEEL']
+                elif data_option == 3:
+                    df = df[df['Source'] == 'CORD']
+                
+                # Get gestational ages for the test set
+                test_gestational_ages = df.iloc[test_indices]['gestational_age_weeks'].values
+                
+                # Calculate subgroup metrics
+                subgroup_metrics = calculate_subgroup_metrics(
+                    y_test.values, y_preds, test_gestational_ages, 
+                    data_option, dataset_type
+                )
+                
+                # Extract metrics for storage
+                preterm_metrics = {
+                    'mae': subgroup_metrics['preterm']['mae'],
+                    'rmse': subgroup_metrics['preterm']['rmse'],
+                    'count': subgroup_metrics['preterm']['count']
+                }
+                term_metrics = {
+                    'mae': subgroup_metrics['term']['mae'],
+                    'rmse': subgroup_metrics['term']['rmse'],
+                    'count': subgroup_metrics['term']['count']
+                }
+                sga_metrics = {
+                    'mae': subgroup_metrics['sga']['mae'],
+                    'rmse': subgroup_metrics['sga']['rmse'],
+                    'count': subgroup_metrics['sga']['count']
+                }
+                normal_metrics = {
+                    'mae': subgroup_metrics['normal']['mae'],
+                    'rmse': subgroup_metrics['normal']['rmse'],
+                    'count': subgroup_metrics['normal']['count']
+                }
+                
+            except Exception as e:
+                print(f"    ⚠️  Warning: Could not calculate subgroup metrics: {e}")
+                # Set default values if subgroup calculation fails
+                preterm_metrics = {'mae': np.nan, 'rmse': np.nan, 'count': 0}
+                term_metrics = {'mae': np.nan, 'rmse': np.nan, 'count': 0}
+                sga_metrics = {'mae': np.nan, 'rmse': np.nan, 'count': 0}
+                normal_metrics = {'mae': np.nan, 'rmse': np.nan, 'count': 0}
+            
             # Extract optimized hyperparameters for CV models
             optimized_alpha = None
             optimized_l1_ratio = None
@@ -167,6 +256,12 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
             # Store regression results
             maes.append(mae)
             rmses.append(rmse)
+            
+            # Store subgroup metrics
+            preterm_metrics_list.append(preterm_metrics)
+            term_metrics_list.append(term_metrics)
+            sga_metrics_list.append(sga_metrics)
+            normal_metrics_list.append(normal_metrics)
             
             # Store regression predictions for this run
             run_predictions.append({
@@ -494,6 +589,12 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
             'auc_mean': auc_mean,
             'auc_ci_lower': auc_ci_lower,
             'auc_ci_upper': auc_ci_upper
+        },
+        'subgroup_metrics': {
+            'preterm': preterm_metrics_list,
+            'term': term_metrics_list,
+            'sga': sga_metrics_list,
+            'normal': normal_metrics_list
         }
     }
     # Add coefficients and feature names for biomarker/combined models
@@ -514,25 +615,19 @@ def generate_model_outputs(model_name, data_type, dataset_type, model_type, resu
     print(f"\nCreating performance metrics table and plots for {model_name} model ({model_type} on {dataset_type})...")
     
     # Create metrics table for both regression and classification
-    metrics_data = {
-        'Metric': ['MAE', 'RMSE', 'AUC'],
-        'Mean': [results['summary']['mae_mean'], results['summary']['rmse_mean'], results['summary']['auc_mean']],
-        'CI_Lower': [results['summary']['mae_ci_lower'], results['summary']['rmse_ci_lower'], results['summary']['auc_ci_lower']],
-        'CI_Upper': [results['summary']['mae_ci_upper'], results['summary']['rmse_ci_upper'], results['summary']['auc_ci_upper']]
-    }
-    metrics_df = pd.DataFrame(metrics_data)
-    metrics_df['CI_95%'] = metrics_df.apply(lambda row: f"[{row['CI_Lower']:.3f}, {row['CI_Upper']:.3f}]" if not np.isnan(row['CI_Lower']) else "N/A", axis=1)
-    metrics_df['Mean_CI'] = metrics_df.apply(lambda row: f"{row['Mean']:.3f} {row['CI_95%']}" if not np.isnan(row['Mean']) else "N/A", axis=1)
-    
-    # Save table
-    os.makedirs(f"outputs/tables", exist_ok=True)
-    metrics_df.to_csv(f"outputs/tables/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv", index=False)
+    from src.utils import create_metrics_table
+    metrics_df = create_metrics_table(
+        results['maes'], results['rmses'], 
+        results['subgroup_metrics']['preterm'], results['subgroup_metrics']['term'],
+        filename=f"outputs/tables/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv"
+    )
+
     print(f"Performance metrics table saved to outputs/tables/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_performance_metrics.csv")
 
     # Create bar plots with confidence intervals (regression and classification)
     plot_metrics_with_confidence_intervals(
         results['maes'], results['rmses'], 
-        [], [],  # Empty lists for preterm/term metrics
+        results['subgroup_metrics']['preterm'], results['subgroup_metrics']['term'],  # Subgroup metrics
         filename=f"outputs/plots/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_metrics_with_ci_{target_type}.png"
     )
     print(f"Performance plots with confidence intervals saved to outputs/plots/{data_option_label}_{dataset_type}_{model_type}_{model_name.lower()}_metrics_with_ci_{target_type}.png")
@@ -581,6 +676,62 @@ def print_detailed_summary(model_name, dataset_type, model_type, results):
         print(f"  AUC: {summary['auc_mean']:.3f} (95% CI: [{summary['auc_ci_lower']:.3f}, {summary['auc_ci_upper']:.3f}])")
     else:
         print(f"  AUC: N/A (insufficient data)")
+    
+    # Print subgroup performance
+    if 'subgroup_metrics' in results:
+        print("\nSubgroup Performance:")
+        
+        # Preterm metrics
+        preterm_metrics = results['subgroup_metrics']['preterm']
+        if preterm_metrics and any(m['count'] > 0 for m in preterm_metrics):
+            preterm_maes = [m['mae'] for m in preterm_metrics if not np.isnan(m['mae']) and m['count'] > 0]
+            preterm_rmses = [m['rmse'] for m in preterm_metrics if not np.isnan(m['rmse']) and m['count'] > 0]
+            if preterm_maes and preterm_rmses:
+                preterm_mae_mean = np.mean(preterm_maes)
+                preterm_rmse_mean = np.mean(preterm_rmses)
+                preterm_mae_ci = np.percentile(preterm_maes, [2.5, 97.5])
+                preterm_rmse_ci = np.percentile(preterm_rmses, [2.5, 97.5])
+                print(f"  Preterm MAE: {preterm_mae_mean:.3f} (95% CI: [{preterm_mae_ci[0]:.3f}, {preterm_mae_ci[1]:.3f}])")
+                print(f"  Preterm RMSE: {preterm_rmse_mean:.3f} (95% CI: [{preterm_rmse_ci[0]:.3f}, {preterm_rmse_ci[1]:.3f}])")
+        
+        # Term metrics
+        term_metrics = results['subgroup_metrics']['term']
+        if term_metrics and any(m['count'] > 0 for m in term_metrics):
+            term_maes = [m['mae'] for m in term_metrics if not np.isnan(m['mae']) and m['count'] > 0]
+            term_rmses = [m['rmse'] for m in term_metrics if not np.isnan(m['rmse']) and m['count'] > 0]
+            if term_maes and term_rmses:
+                term_mae_mean = np.mean(term_maes)
+                term_rmse_mean = np.mean(term_rmses)
+                term_mae_ci = np.percentile(term_maes, [2.5, 97.5])
+                term_rmse_ci = np.percentile(term_rmses, [2.5, 97.5])
+                print(f"  Term MAE: {term_mae_mean:.3f} (95% CI: [{term_mae_ci[0]:.3f}, {term_mae_ci[1]:.3f}])")
+                print(f"  Term RMSE: {term_rmse_mean:.3f} (95% CI: [{term_rmse_ci[0]:.3f}, {term_rmse_ci[1]:.3f}])")
+        
+        # SGA metrics
+        sga_metrics = results['subgroup_metrics']['sga']
+        if sga_metrics and any(m['count'] > 0 for m in sga_metrics):
+            sga_maes = [m['mae'] for m in sga_metrics if not np.isnan(m['mae']) and m['count'] > 0]
+            sga_rmses = [m['rmse'] for m in sga_metrics if not np.isnan(m['rmse']) and m['count'] > 0]
+            if sga_maes and sga_rmses:
+                sga_mae_mean = np.mean(sga_maes)
+                sga_rmse_mean = np.mean(sga_rmses)
+                sga_mae_ci = np.percentile(sga_maes, [2.5, 97.5])
+                sga_rmse_ci = np.percentile(sga_rmses, [2.5, 97.5])
+                print(f"  SGA MAE: {sga_mae_mean:.3f} (95% CI: [{sga_mae_ci[0]:.3f}, {sga_mae_ci[1]:.3f}])")
+                print(f"  SGA RMSE: {sga_rmse_mean:.3f} (95% CI: [{sga_rmse_ci[0]:.3f}, {sga_rmse_ci[1]:.3f}])")
+        
+        # Normal metrics
+        normal_metrics = results['subgroup_metrics']['normal']
+        if normal_metrics and any(m['count'] > 0 for m in normal_metrics):
+            normal_maes = [m['mae'] for m in normal_metrics if not np.isnan(m['mae']) and m['count'] > 0]
+            normal_rmses = [m['rmse'] for m in normal_metrics if not np.isnan(m['rmse']) and m['count'] > 0]
+            if normal_maes and normal_rmses:
+                normal_mae_mean = np.mean(normal_maes)
+                normal_rmse_mean = np.mean(normal_rmses)
+                normal_mae_ci = np.percentile(normal_maes, [2.5, 97.5])
+                normal_rmse_ci = np.percentile(normal_rmses, [2.5, 97.5])
+                print(f"  Normal MAE: {normal_mae_mean:.3f} (95% CI: [{normal_mae_ci[0]:.3f}, {normal_mae_ci[1]:.3f}])")
+                print(f"  Normal RMSE: {normal_rmse_mean:.3f} (95% CI: [{normal_rmse_ci[0]:.3f}, {normal_rmse_ci[1]:.3f}])")
 
     print("="*60)
 

@@ -31,7 +31,7 @@ echo "📊 Step 1: Running gestational age analysis..."
 
 # Debug: Test if we can import the main modules
 echo "🔍 DEBUG: Testing imports..."
-python -c "from src.config_sherlock import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF; print(f'Sherlock config loaded: N_REPEATS={N_REPEATS}, TEST_SIZE={TEST_SIZE}, PRETERM_CUTOFF={PRETERM_CUTOFF}')"
+python -c "from src.config import N_REPEATS, TEST_SIZE, PRETERM_CUTOFF; print(f'Config loaded: N_REPEATS={N_REPEATS}, TEST_SIZE={TEST_SIZE}, PRETERM_CUTOFF={PRETERM_CUTOFF}')"
 python -c "from src.data_loader import load_and_process_data; print('Data loader import successful')"
 python -c "from src.model import get_model; print('Model import successful')"
 

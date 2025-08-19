@@ -880,9 +880,12 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
     import seaborn as sns
     from adjustText import adjust_text
 
-    # Extract biomarker frequencies for heel and cord datasets
-    heel_freq = {}
-    cord_freq = {}
+    # Extract biomarker selection frequencies (proportion of runs with non-zero coef) for heel and cord datasets
+    eps = 1e-12
+    heel_select_count = {}
+    heel_total_count = {}
+    cord_select_count = {}
+    cord_total_count = {}
     for key, result in model_results.items():
         if 'heel' in key and model_type in key:
             if 'all_coefficients' in result and result['all_coefficients'] is not None:
@@ -891,9 +894,9 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
                     feature_names = result.get('feature_names', [f'Feature_{i}' for i in range(len(all_coefs[0]))])
                     for run_coefs in all_coefs:
                         for i, (name, val) in enumerate(zip(feature_names, run_coefs)):
-                            if name not in heel_freq:
-                                heel_freq[name] = []
-                            heel_freq[name].append(abs(val))
+                            heel_total_count[name] = heel_total_count.get(name, 0) + 1
+                            if np.abs(val) > eps:
+                                heel_select_count[name] = heel_select_count.get(name, 0) + 1
         elif 'cord' in key and model_type in key:
             if 'all_coefficients' in result and result['all_coefficients'] is not None:
                 all_coefs = result['all_coefficients']
@@ -901,11 +904,11 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
                     feature_names = result.get('feature_names', [f'Feature_{i}' for i in range(len(all_coefs[0]))])
                     for run_coefs in all_coefs:
                         for i, (name, val) in enumerate(zip(feature_names, run_coefs)):
-                            if name not in cord_freq:
-                                cord_freq[name] = []
-                            cord_freq[name].append(abs(val))
-    heel_mean = {name: np.mean(vals) for name, vals in heel_freq.items()}
-    cord_mean = {name: np.mean(vals) for name, vals in cord_freq.items()}
+                            cord_total_count[name] = cord_total_count.get(name, 0) + 1
+                            if np.abs(val) > eps:
+                                cord_select_count[name] = cord_select_count.get(name, 0) + 1
+    heel_mean = {name: (heel_select_count.get(name, 0) / heel_total_count[name]) for name in heel_total_count if heel_total_count[name] > 0}
+    cord_mean = {name: (cord_select_count.get(name, 0) / cord_total_count[name]) for name in cord_total_count if cord_total_count[name] > 0}
     common_biomarkers = set(heel_mean.keys()) & set(cord_mean.keys())
     if not common_biomarkers:
         print(f"No common biomarkers found for {model_type}")
@@ -928,7 +931,7 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
                         c=df['Total_Frequency'], cmap='viridis', s=60, alpha=0.7, 
                         edgecolors='black', linewidth=0.5, zorder=3)
     cbar = plt.colorbar(scatter, ax=ax, shrink=0.8, aspect=20)
-    cbar.set_label('Total Frequency (Heel + Cord)', fontsize=12, fontweight='bold')
+    cbar.set_label('Total Selection Frequency (Heel + Cord)', fontsize=12, fontweight='bold')
     cbar.ax.tick_params(labelsize=10)
 
     threshold = 0.5
@@ -947,40 +950,44 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
     
     print(f"Labeling top {top_50_percent_count} biomarkers out of {total_biomarkers} total biomarkers (top 50%)")
 
-    # B. Clean, publication-style labeling (no box, no arrow, small font, minimal offset)
-    texts = []
-    print("Using updated clean label style for biomarker frequency plot (labels should be red)")
-    for _, row in to_label.iterrows():
-        texts.append(
-            ax.annotate(
-                row['Biomarker'],
-                (row['Heel_Frequency'], row['Cord_Frequency']),
-                xytext=(2, 2), textcoords='offset points',
-                fontsize=8, color='red', alpha=0.9,
-                ha='left', va='bottom'
-            )
-        )
-    # Optionally use adjustText for gentle nudge
-    from adjustText import adjust_text
-    adjust_text(
-        texts, ax=ax, force_text=0.01, force_points=0.01, lim=100
+    # Highlight labeled points for clarity
+    ax.scatter(
+        to_label['Heel_Frequency'], to_label['Cord_Frequency'],
+        s=140, facecolors='none', edgecolors='red', linewidths=1.5, zorder=6
     )
 
-    max_val = max(df['Heel_Frequency'].max(), df['Cord_Frequency'].max())
-    ax.plot([0, max_val], [0, max_val], '--', color='red', alpha=0.8, linewidth=2, 
+    # Label with leader lines pointing to each dot; alternate offsets to reduce overlap
+    print("Using leader-line label style for biomarker frequency plot (labels point to their dots)")
+    offsets = [(14, 10), (14, -10), (-14, 10), (-14, -10)]
+    for idx, (_, row) in enumerate(to_label.iterrows()):
+        dx, dy = offsets[idx % len(offsets)]
+        ha = 'left' if dx >= 0 else 'right'
+        va = 'bottom' if dy >= 0 else 'top'
+        ax.annotate(
+            row['Biomarker'],
+            xy=(row['Heel_Frequency'], row['Cord_Frequency']),
+            xytext=(dx, dy), textcoords='offset points',
+            fontsize=9, color='red', alpha=0.95,
+            ha=ha, va=va,
+            arrowprops=dict(arrowstyle='-', color='red', lw=0.8, shrinkA=0, shrinkB=0),
+            zorder=7
+        )
+
+    # Fix scale to [0, 1]
+    ax.plot([0, 1.0], [0, 1.0], '--', color='red', alpha=0.8, linewidth=2, 
             label='Equal frequency line')
-    mid_val = max_val / 2
+    mid_val = 0.5
     ax.axhline(y=mid_val, color='gray', linestyle=':', alpha=0.5, linewidth=1)
     ax.axvline(x=mid_val, color='gray', linestyle=':', alpha=0.5, linewidth=1)
-    ax.set_xlabel('Biomarker Frequency (Heel)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Biomarker Frequency (Cord)', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Selection Frequency (Heel)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Selection Frequency (Cord)', fontsize=14, fontweight='bold')
     target_title = target_type.replace('_', ' ').title()
     ax.set_title(f'Biomarker Frequency Comparison: Heel vs Cord\n{model_type.upper()} - {target_title}', 
                 fontsize=16, fontweight='bold', pad=20)
     ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    ax.set_xlim(0, max_val * 1.05)
-    ax.set_ylim(0, max_val * 1.05)
+    ax.set_xlim(0, 1.0)
+    ax.set_ylim(0, 1.0)
     correlation = df['Heel_Frequency'].corr(df['Cord_Frequency'])
     ax.text(0.05, 0.95, f'Correlation: {correlation:.3f}', transform=ax.transAxes, 
             fontsize=12, fontweight='bold',
