@@ -46,7 +46,6 @@ print(f"🔧 Using regular config (N_REPEATS={N_REPEATS})")
 DATA_OPTION_LABELS = {1: 'both_samples', 2: 'heel_all', 3: 'cord_all'}
 
 def run_single_model(model_name, data_type, dataset_type, model_type, data_option=1, data_option_label='both_samples', target_type='gestational_age'):
-    stabl_heel_biomarker_zero_feature_runs = []
     """
     Run a single model configuration and return results.
     
@@ -62,6 +61,7 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
     Returns:
         dict: Model results and summary statistics
     """
+    stabl_heel_biomarker_zero_feature_runs = []
     print(f"\n{'='*60}")
     print(f"MODEL: {model_name} ({data_type.upper()} DATA) - {model_type.upper()} ON {dataset_type.upper()} [{data_option_label}]")
     print(f"{'='*60}")
@@ -146,7 +146,6 @@ def run_single_model(model_name, data_type, dataset_type, model_type, data_optio
                 from src.sga_classification import create_sga_targets_intergrowth21
                 # Get gestational ages and birth weights for subgroup classification
                 # We need to load the original data to get gestational ages
-                from src.data_loader import load_and_process_data
                 
                 # Load the data to get gestational ages for subgroup classification
                 data, feature_names = load_and_process_data(

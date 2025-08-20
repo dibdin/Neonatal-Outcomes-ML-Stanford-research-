@@ -30,6 +30,10 @@ python3 main.py gestational_age
 python3 main.py birth_weight
 python3 merge_all_results.py
 python3 generate_comparison_plots.py
+python3 plot_scatter_plots.py
+python3 best_model_scatter_plots.py
+python3 subgroup_analysis.py gestational_age
+python3 subgroup_analysis.py birth_weight
 python3 organize_plots.py
 python3 analyze_hyperparameters.py
 python3 comprehensive_hyperparameter_summary.py
