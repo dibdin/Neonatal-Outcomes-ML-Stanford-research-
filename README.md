@@ -2,6 +2,8 @@
 
 This repository contains a comprehensive machine learning pipeline for predicting gestational age and classifying preterm births using serum biomarkers and clinical data from cord and heel blood samples.
 
+Link to poster presentation at MCHRI DRIVE 2025 Symposium: https://drive.google.com/file/d/1zbxuDT7oj7iz5E8p28a_RDRSphCZUlfZ/view?usp=sharing
+
 ## Overview
 
 The project implements multiple model approaches to predict gestational age and identify preterm births:
