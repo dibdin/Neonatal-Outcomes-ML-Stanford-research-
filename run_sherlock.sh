@@ -9,7 +9,7 @@ ERROR_FILE="error_%j.txt"
 TIME_LIMIT="72:00:00"
 MEMORY="64G"
 CPUS=16
-PARTITION="dev"  # changed from normal to dev
+PARTITION="normal"  # changed from normal to dev
 PYTHON_MODULE="python/3.9"
 
 cat <<EOF > $JOB_SCRIPT
@@ -39,6 +39,9 @@ python3 analyze_hyperparameters.py
 python3 comprehensive_hyperparameter_summary.py
 python3 pipeline_summary.py
 python3 plot_summary.py
+python3 plot_auc_results.py
+python3 plot_best_models_comparison.py
+python3 plot_feature_selection.py
 
 echo "🎉 ALL ANALYSES COMPLETED at \$(date)"
 EOF
