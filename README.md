@@ -287,7 +287,7 @@ If you use this code in your research, please cite:
 ```bibtex
 @software{serum_biomarkers,
   title={Gestational Age Prediction and Preterm Birth Classification},
-  author={Diba Dindoust},
+  author={},
   year={2025},
   url={https://github.com/yourusername/serum_biomarkers}
 }
@@ -295,7 +295,7 @@ If you use this code in your research, please cite:
 
 ## Contact
 
-For questions or issues, please open an issue on GitHub or contact [your-email@example.com].
+For questions or issues, please open an issue on GitHub or contact [].
 
 ## Acknowledgments
 
