@@ -287,15 +287,15 @@ If you use this code in your research, please cite:
 ```bibtex
 @software{serum_biomarkers,
   title={Gestational Age Prediction and Preterm Birth Classification},
-  author={},
+  author={Diba Dindoust},
   year={2025},
-  url={https://github.com/yourusername/serum_biomarkers}
+  url={https://github.com/dibdin/serum_biomarkers}
 }
 ```
 
 ## Contact
 
-For questions or issues, please open an issue on GitHub or contact [].
+For questions or issues, please open an issue on GitHub or contact [dibadin@stanford.edu].
 
 ## Acknowledgments
 
