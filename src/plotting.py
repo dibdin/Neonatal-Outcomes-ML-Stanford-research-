@@ -401,7 +401,6 @@ def plot_hyperparameters(
 
     # Define hyperparameters for each model type
     MODEL_HYPERPARAMS = {
-        "lasso_cv":  ["C", "penalty", "alpha"],
         "elasticnet_cv": ["C", "penalty", "l1_ratio", "alpha"]
     }
     # Decide which keys are present
@@ -777,8 +776,8 @@ def plot_mean_regression_metrics(
         ),
     ]
 
-    # One plot per model (elasticnet vs lasso), for training and validation.
-    for plot_model in ["elasticnet_cv", "lasso_cv"]:
+    # One plot per model, for training and validation.
+    for plot_model in ["elasticnet_cv"]:
         model_df = df[df["model"] == plot_model]
         if model_df.empty:
             continue
@@ -1248,7 +1247,7 @@ def run_all_plots(validation: bool = False) -> None:
 
     for data_option in [1, 2, 3]:
         for model_type in ["clinical", "biomarker", "combined"]:
-            for model_name in ["lasso_cv", "elasticnet_cv"]:
+            for model_name in ["elasticnet_cv"]:
                 if data_option == 1:
                     data_types = ["heel", "cord"]
                 else:
@@ -1326,7 +1325,7 @@ def run_all_plots(validation: bool = False) -> None:
 
         plot_average_auc(Path("outputs/classification"), validation=validation)
 
-    plot_mean_regression_metrics(1, "clinical", "lasso_cv", "heel", validation=validation)
+    plot_mean_regression_metrics(1, "clinical", "elasticnet_cv", "heel", validation=validation)
 
 
 def main():

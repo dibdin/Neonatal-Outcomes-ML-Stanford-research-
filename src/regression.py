@@ -7,7 +7,7 @@ External validation on held-out cohort:
     python src/regression.py --all-validate --data_option 1
 
 Single configuration:
-    python src/regression.py --data_option 1 --model_type biomarker --model_name lasso_cv --data_type heel
+    python src/regression.py --data_option 1 --model_type biomarker --model_name elasticnet_cv --data_type heel
 """
 
 import argparse
@@ -47,7 +47,7 @@ def _run_dir(model_name: str, data_option: int, model_type: str, data_type: str)
 def _extract_coef(model, model_name: str) -> list:
     """Extract the coefficient array from a fitted GridSearchCV regression pipeline."""
     coef_flat = []
-    step_name = "elasticnet" if model_name == "elasticnet_cv" else "lasso"
+    step_name = "elasticnet"
     if hasattr(model, "best_estimator_"):
         est = model.best_estimator_
         if hasattr(est, "named_steps"):
@@ -119,11 +119,8 @@ def run_validation(
         best_params = model.best_params_ if hasattr(model, "best_params_") else {}
         hyperparameters_all.append(pd.DataFrame({
             "run": i,
-            "alpha": (
-                best_params.get("elasticnet__alpha") if model_name == "elasticnet_cv"
-                else best_params.get("lasso__alpha")
-            ),
-            "l1_ratio": best_params.get("elasticnet__l1_ratio") if model_name == "elasticnet_cv" else None,
+            "alpha": best_params.get("elasticnet__alpha"),
+            "l1_ratio": best_params.get("elasticnet__l1_ratio"),
         }, index=[i]))
 
         coef_flat = _extract_coef(model, model_name)
@@ -249,11 +246,8 @@ def run_regression_model(
         best_params = model.best_params_ if hasattr(model, "best_params_") else {}
         hyperparameters_all.append(pd.DataFrame({
             "run": i,
-            "alpha": (
-                best_params.get("elasticnet__alpha") if model_name == "elasticnet_cv"
-                else best_params.get("lasso__alpha")
-            ),
-            "l1_ratio": best_params.get("elasticnet__l1_ratio") if model_name == "elasticnet_cv" else None,
+            "alpha": best_params.get("elasticnet__alpha"),
+            "l1_ratio": best_params.get("elasticnet__l1_ratio"),
         }, index=[i]))
 
         coef_flat = _extract_coef(model, model_name)
@@ -307,7 +301,7 @@ def main():
     parser.add_argument("--validate", action="store_true", help="External validation on held-out cohort data")
     parser.add_argument("--data_option", type=int, default=1, choices=[1, 2, 3])
     parser.add_argument("--model_type", default="clinical", choices=["clinical", "biomarker", "combined"])
-    parser.add_argument("--model_name", default="elasticnet_cv", choices=["elasticnet_cv", "lasso_cv"])
+    parser.add_argument("--model_name", default="elasticnet_cv", choices=["elasticnet_cv"])
     parser.add_argument("--data_type", default="heel", choices=["heel", "cord"])
     parser.add_argument("--run_number", type=int, default=N_REPEATS)
     parser.add_argument("--all", action="store_true", help="Run all training configurations")
@@ -322,7 +316,7 @@ def main():
         configs = (
             [
                 (mt, mn, dt)
-                for mn in ["elasticnet_cv", "lasso_cv"]
+                for mn in ["elasticnet_cv"]
                 for mt in ["clinical", "biomarker", "combined"]
                 for dt in ["heel", "cord"]
             ]
@@ -335,7 +329,7 @@ def main():
 
     if args.all:
         for model_type in ["clinical", "biomarker", "combined"]:
-            for model_name in ["lasso_cv", "elasticnet_cv"]:
+            for model_name in ["elasticnet_cv"]:
                 for data_type in ["heel", "cord"]:
                     run_regression_model(1, model_type, model_name, data_type)
         return

@@ -7,7 +7,7 @@ External validation on external cohort:
     python src/classification.py --validate --all --data_option 1
 
 Single configuration:
-    python src/classification.py --data_option 1 --model_type biomarker --model_name lasso_cv --data_type cord
+    python src/classification.py --data_option 1 --model_type biomarker --model_name elasticnet_cv --data_type cord
 """
 
 import argparse
@@ -272,7 +272,7 @@ def main():
     parser.add_argument("--validate", action="store_true", help="External validation on held-out cohort data")
     parser.add_argument("--data_option", type=int, default=1, choices=[1, 2, 3])
     parser.add_argument("--model_type", default="clinical", choices=["clinical", "biomarker", "combined"])
-    parser.add_argument("--model_name", default="elasticnet_cv", choices=["elasticnet_cv", "lasso_cv"])
+    parser.add_argument("--model_name", default="elasticnet_cv", choices=["elasticnet_cv"])
     parser.add_argument("--data_type", default="heel", choices=["heel", "cord"])
     parser.add_argument("--run_number", type=int, default=N_REPEATS)
     parser.add_argument(
@@ -287,7 +287,7 @@ def main():
             [
                 (mt, mn, dt)
                 for mt in ["clinical", "biomarker", "combined"]
-                for mn in ["elasticnet_cv", "lasso_cv"]
+                for mn in ["elasticnet_cv"]
                 for dt in ["heel", "cord"]
             ]
             if args.all
@@ -304,7 +304,7 @@ def main():
             else ["cord"]
         )
         for model_type in ["clinical", "biomarker", "combined"]:
-            for model_name in ["elasticnet_cv", "lasso_cv"]:
+            for model_name in ["elasticnet_cv"]:
                 for data_type in data_types:
                     run_classification_model(
                         args.data_option, model_type, model_name, data_type, args.run_number

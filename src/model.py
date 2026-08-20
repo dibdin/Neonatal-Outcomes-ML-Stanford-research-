@@ -1,14 +1,14 @@
 """Model definitions for the gestational age prediction pipeline.
 
-Provides pipeline factories for regularised regression (Lasso, Elastic Net)
-and regularised logistic regression (L1, Elastic Net penalty) via GridSearchCV.
+Provides pipeline factories for regularised regression (Elastic Net)
+and regularised logistic regression (Elastic Net penalty) via GridSearchCV.
 Each pipeline applies median imputation and standard scaling before fitting.
 """
 
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import ElasticNet, Lasso, LogisticRegression
+from sklearn.linear_model import ElasticNet, LogisticRegression
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, KFold
 import numpy as np
 
@@ -26,7 +26,7 @@ def get_model(model_type: str):
 
     Parameters
     ----------
-    model_type : {'elasticnet_cv', 'lasso_cv'}
+    model_type : {'elasticnet_cv'}
 
     Returns
     -------
@@ -56,29 +56,9 @@ def get_model(model_type: str):
         )
         return cv_model, None
 
-    elif model_type == "lasso_cv":
-        param_grid = {"lasso__alpha": _REGRESSION_ALPHA_GRID}
-        steps = [
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-            ("lasso", Lasso(
-                max_iter=1000, fit_intercept=True, tol=1e-4, random_state=RANDOM_SEED
-            )),
-        ]
-        pipeline = Pipeline(steps)
-        cv_model = GridSearchCV(
-            pipeline,
-            param_grid,
-            cv=KFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED),
-            scoring="neg_mean_squared_error",
-            n_jobs=1,
-            verbose=0,
-        )
-        return cv_model, None
-
     else:
         raise ValueError(
-            f"Unknown model type: '{model_type}'. Supported: 'elasticnet_cv', 'lasso_cv'."
+            f"Unknown model type: '{model_type}'. Supported: 'elasticnet_cv'."
         )
 
 
@@ -87,8 +67,8 @@ def get_classification_model(model_type: str):
 
     Parameters
     ----------
-    model_type : {'elasticnet_cv', 'lasso_cv'}
-        'elasticnet_cv' uses an elastic-net penalty; 'lasso_cv' uses L1.
+    model_type : {'elasticnet_cv'}
+        'elasticnet_cv' uses an elastic-net penalty.
 
     Returns
     -------
@@ -121,28 +101,7 @@ def get_classification_model(model_type: str):
         )
         return cv_model, None
 
-    elif model_type == "lasso_cv":
-        param_grid = {"logisticregression__C": _CLASSIFICATION_C_GRID}
-        pipeline = Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-            ("logisticregression", LogisticRegression(
-                penalty="l1", solver="saga",
-                max_iter=1000, fit_intercept=True, tol=1e-4,
-                class_weight=class_weight, random_state=RANDOM_SEED,
-            )),
-        ])
-        cv_model = GridSearchCV(
-            pipeline,
-            param_grid,
-            cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_SEED),
-            scoring="roc_auc",
-            n_jobs=1,
-            verbose=0,
-        )
-        return cv_model, None
-
     else:
         raise ValueError(
-            f"Unknown model type: '{model_type}'. Supported: 'elasticnet_cv', 'lasso_cv'."
+            f"Unknown model type: '{model_type}'. Supported: 'elasticnet_cv'."
         )

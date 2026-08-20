@@ -85,7 +85,7 @@ def plot_feature_frequency(feature_names, freq, filename, min_freq=0.5, model_na
         freq: array of frequencies (same order as feature_names)
         filename: output file path
         min_freq: minimum frequency threshold (default 0.5 = 50%)
-        model_name: name of the model (e.g., "Lasso")
+        model_name: name of the model (e.g., "ElasticNet")
         dataset_name: name of the dataset (e.g., "Heel")
     """
     os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -441,7 +441,7 @@ def _normalize_auc_df(df):
     need = ["Dataset", "FeatureSet", "AUC", "AUC_CI_Lower", "AUC_CI_Upper"]
     df = df.loc[:, [c for c in need if c in df.columns]]
 
-    # If multiple rows exist for a (Dataset, FeatureSet) pair (e.g., Lasso & Elasticnet),
+    # If multiple rows exist for a (Dataset, FeatureSet) pair,
     # choose the best AUC or average — here we keep the max AUC.
     df = (
         df.sort_values("AUC", ascending=False)
@@ -568,7 +568,7 @@ def plot_summary_auc_by_dataset_and_model(summary_df, filename="outputs/plots/su
     Args:
         summary_df (pd.DataFrame): Summary statistics DataFrame
         filename (str): Output file path
-        model_type_label (str): Label for the x-axis (e.g., 'Lasso', 'ElasticNet', 'STABL')
+        model_type_label (str): Label for the x-axis (e.g., 'ElasticNet')
     """
     # Normalize the input data
     normalized_df = _normalize_auc_df(summary_df)
@@ -714,7 +714,7 @@ def plot_summary_mae_by_dataset_and_model(summary_df, filename, model_type_label
     Args:
         summary_df (pd.DataFrame): Summary statistics DataFrame
         filename (str): Output file path
-        model_type_label (str): Label for the x-axis (e.g., 'Lasso', 'Elasticnet', 'Stabl')
+        model_type_label (str): Label for the x-axis (e.g., 'ElasticNet')
     """
     plot_df = _prepare_summary_for_plot(summary_df, 'MAE', 'MAE_CI_Lower', 'MAE_CI_Upper')
     datasets = ['heel', 'cord']
@@ -784,7 +784,7 @@ def plot_summary_rmse_by_dataset_and_model(summary_df, filename, model_type_labe
     Args:
         summary_df (pd.DataFrame): Summary statistics DataFrame
         filename (str): Output file path
-        model_type_label (str): Label for the x-axis (e.g., 'Lasso', 'Elasticnet', 'Stabl')
+        model_type_label (str): Label for the x-axis (e.g., 'ElasticNet')
     """
     plot_df = _prepare_summary_for_plot(summary_df, 'RMSE', 'RMSE_CI_Lower', 'RMSE_CI_Upper')
     datasets = ['heel', 'cord']
@@ -876,7 +876,7 @@ def plot_true_vs_predicted_scatter(all_preds_df, filename="outputs/plots/true_vs
 
     # Define model type mapping for cleaner labels
     modeltype_name_map = {
-        'lasso': 'Lasso',
+        'elasticnet': 'ElasticNet',
         'elasticnet': 'ElasticNet',
         'stabl': 'STABL'
     }
@@ -1031,7 +1031,7 @@ def plot_biomarker_frequency_heel_vs_cord(model_results, model_type, filename, t
     Create a scatter plot comparing biomarker frequencies between heel and cord datasets.
     Args:
         model_results (dict): Dictionary containing model results
-        model_type (str): Type of model ('lasso', 'elasticnet', 'stabl')
+        model_type (str): Type of model ('elasticnet')
         filename (str): Output filename for the plot
         target_type (str): Target type ('gestational_age' or 'birth_weight')
     Note:
@@ -1156,7 +1156,7 @@ def plot_summary_auc_combined_heel_cord(
     heel_df,
     cord_df,
     filename="outputs/plots/summary_auc_by_dataset_and_model_combined_heel_cord.png",
-    model_type_label="Lasso/ElasticNet (CV)",
+    model_type_label="ElasticNet (CV)",
     metric_label="AUC",
 ):
     """
@@ -1383,7 +1383,7 @@ def plot_auc_classification_comparison(
         if len(parts) >= 4:
             data_option_label = parts[0] + '_' + parts[1]  # both_samples
             dataset_type = parts[2]  # heel or cord
-            model_type = parts[3]    # lasso_cv or elasticnet_cv
+            model_type = parts[3]    # elasticnet_cv
             model_name = parts[4]    # Clinical, Biomarker, or Combined
 
             # Get AUC data
@@ -1414,14 +1414,14 @@ def plot_auc_classification_comparison(
 
     # Define colors for model types
     colors = {
-        'Lasso': '#1f77b4',
+        'ElasticNet': '#1f77b4',
         'Elasticnet': '#ff7f0e'
     }
 
     # Define positions for bars
     datasets = ['Heel', 'Cord']
     featuresets = ['Clinical', 'Biomarker', 'Combined']
-    model_types = ['Lasso', 'Elasticnet']
+    model_types = ['ElasticNet']
 
     # Calculate bar positions
     n_datasets = len(datasets)
