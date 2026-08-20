@@ -4,7 +4,7 @@ Machine learning pipeline for predicting gestational age and classifying preterm
 
 ## Overview
 
-The pipeline trains regularised regression and classification models (Lasso/L1, ElasticNet) across three feature sets:
+The pipeline trains regularised regression and classification models (ElasticNet) across three feature sets:
 
 - **Clinical model** — birth weight, sex, multiple birth, pre-pregnancy BMI, maternal age at delivery
 - **Biomarker model** — 92 newborn screening serum biomarkers (amino acids, acylcarnitines, haemoglobin fractions, metabolic analytes)
