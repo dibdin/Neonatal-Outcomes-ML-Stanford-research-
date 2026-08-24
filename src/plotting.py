@@ -843,8 +843,8 @@ def plot_mean_regression_metrics(
                         label=METRIC_STYLE["mean_rmse"]["label"] if x_idx == 0 else "",
                     )
 
-                    ax.bar_label(mae_bar, labels=[f"{mean_mae:.2f}"], padding=2, fontsize=9)
-                    ax.bar_label(rmse_bar, labels=[f"{mean_rmse:.2f}"], padding=2, fontsize=9)
+                    ax.bar_label(mae_bar, labels=[f"{mean_mae:.2f}"], padding=2, fontsize=13, fontweight="bold")
+                    ax.bar_label(rmse_bar, labels=[f"{mean_rmse:.2f}"], padding=2, fontsize=13, fontweight="bold")
 
                     x_positions.append(x_center)
                     x_labels.append(f"{group_title}\n{feature_set}")
@@ -856,9 +856,10 @@ def plot_mean_regression_metrics(
                 continue
 
             ax.set_xticks(x_positions)
-            ax.set_xticklabels(x_labels, rotation=20, ha="right", fontsize=10)
-            ax.set_ylabel("Average MAE and RMSE", fontsize=12)
-            ax.set_title(plot_title, fontsize=12, fontweight="bold")
+            ax.set_xticklabels(x_labels, rotation=20, ha="right", fontsize=13)
+            ax.set_ylabel("Average MAE and RMSE", fontsize=14, fontweight="bold")
+            ax.set_title(plot_title, fontsize=14, fontweight="bold")
+            ax.tick_params(axis="y", labelsize=13)
             ax.grid(axis="y", alpha=0.3)
             ax.legend()
             fig.tight_layout()

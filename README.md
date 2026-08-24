@@ -30,7 +30,7 @@ serum_biomarkers/
 │   ├── compare_feature_quality.py # Feature quality comparison
 │   ├── compare_sample_subsets.py  # Heel vs cord sub-type comparison
 │   └── prepare_validation_dataset.py  # External validation data preparation
-├── data/                          # Data files (not included in repo)
+├── data/                          # Data files
 ├── outputs/                       # Generated results and figures
 └── requirements.txt
 ```
@@ -74,7 +74,7 @@ TEST_SIZE      = 0.2
 
 ## Data
 
-The pipeline expects two CSV files (not included):
+The pipeline expects two CSV files:
 
 - **Training cohort** — heel-prick and cord-blood samples with `gestational_age_weeks`, clinical features, and biomarker analytes; a `Source` column (`HEEL` / `CORD`) identifies sample type.
 - **External validation cohort** — same feature columns; sample type is encoded in the `study_id` suffix (`-C` = cord, `-H` = heel).
@@ -89,4 +89,4 @@ If you use this code, please cite the associated publication (details to be adde
 
 ## Acknowledgements
 
-This work was supported by the Maternal and Child Health Research Institute (MCHRI) and conducted at Stanford University.
+This work was supported by the Maternal and Child Health Research Institute (MCHRI) and the Bill & Melinda Gates Foundation, and was conducted at Stanford University.
