@@ -32,6 +32,7 @@ from src.feature_sets import (
     load_training_frame,
     load_validation_frame,
     align_to_training_features,
+    add_hgb_ratio,
 )
 
 OUTPUT_DIR = Path("outputs/regression")
@@ -190,6 +191,7 @@ def run_regression_model(
     else:
         raise ValueError("data_option must be 1, 2, or 3.")
 
+    df = add_hgb_ratio(df)
     keep_cols = [c for c in CLINICAL_FEATURES + BIOMARKER_FEATURES + [TARGET_COL] if c in df.columns]
     df = df[keep_cols].copy()
     if TARGET_COL not in df.columns:

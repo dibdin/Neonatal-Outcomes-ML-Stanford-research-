@@ -31,9 +31,14 @@ from src.feature_sets import (
     BIOMARKER_FEATURES,
     EXTERNAL_VALIDATION_CSV,
     filter_validation_by_sample_type,
+    add_hgb_ratio,
 )
 
 VALIDATION_SUBDIR = "validation_zimbabwe"
+
+# Actual output directory names produced by classification.py and regression.py
+CLASSIFICATION_OUTDIR = _project_root / "outputs" / "classification"
+REGRESSION_OUTDIR     = _project_root / "outputs" / "regression"
 
 
 def _config_run_dir(
@@ -72,25 +77,7 @@ def _result_subdir_name(subdir: Path, validation: bool) -> Optional[str]:
         return subdir.parent.name
     return subdir.name
 
-def boxplot_irt_dataset_preterm_term() -> None:
-
-    """
-    Plot boxplots for IRT from the dataset, one box for preterm and one for term babies.
-    """
-    df = pd.read_csv("data/Bangladesh_children_with_both_samples.csv")
-    preterm_irt = df[df["gestational_age_weeks"] < PRETERM_CUTOFF]["IRT"].dropna()
-    term_irt = df[df["gestational_age_weeks"] >= PRETERM_CUTOFF]["IRT"].dropna()
-
-    plt.figure(figsize=(10, 5))
-    plt.boxplot([preterm_irt, term_irt], labels=["Preterm", "Term"], widths=0.5)
-    plt.xlabel("Group")
-    plt.ylabel("IRT")
-
-    out_dir = _project_root / "outputs" / "plots"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_dir / "boxplot_irt_dataset_preterm_term.png")
-    plt.close()
-
+#analysis for figures 5 and 7
 def _benjamini_hochberg(pvals: np.ndarray) -> np.ndarray:
     """Benjamini–Hochberg adjusted p-values (same length as pvals)."""
     pvals = np.asarray(pvals, dtype=float)
@@ -107,7 +94,7 @@ def _benjamini_hochberg(pvals: np.ndarray) -> np.ndarray:
     out[order] = bh_adj
     return out
 
-
+#plots figure 1 and 6
 def plot_average_auc(outdir: Path, validation: bool = False) -> None:
     """
     Scan all runs under outputs/classification/, compute average AUC per
@@ -283,7 +270,7 @@ def plot_average_auc(outdir: Path, validation: bool = False) -> None:
         plt.close(fig)
 
 
-
+# plots figure 2 and 3
 def plot_features_selected(
     data_option: int,
     model_type: str,
@@ -378,7 +365,7 @@ def plot_features_selected(
     fig.savefig(out_fn, dpi=300)
     plt.close(fig)
 
-
+# plotting function does not appear as a figure in the manuscript but can be used to plot the hyperparameters of the models
 def plot_hyperparameters(
     data_option: int,
     model_type: str,
@@ -455,6 +442,7 @@ def plot_hyperparameters(
     plt.savefig(out_fn, dpi=300)
     plt.close()
 
+# plotting function does not appear as a figure in the manuscript but can be used to plot the predictions of the classificationmodels
 def plot_all_predictions(
     data_option: int,
     model_type: str,
@@ -470,7 +458,7 @@ def plot_all_predictions(
     repeated splits.
     """
     run_dir = _config_run_dir(
-        Path("outputs/classification"),
+        CLASSIFICATION_OUTDIR,
         model_name,
         data_option,
         model_type,
@@ -527,7 +515,7 @@ def plot_all_predictions(
     plt.legend(fontsize=9)
     plt.tight_layout()
 
-    save_dir = _plots_save_dir(Path("outputs/classification"), validation)
+    save_dir = _plots_save_dir(CLASSIFICATION_OUTDIR, validation)
     zim_prefix = "validation_" if validation else ""
     if data_option == 1:
         out_fn = save_dir / f"{zim_prefix}predictions_{model_type}_{model_name}_{data_option}_{data_type}.png"
@@ -536,6 +524,7 @@ def plot_all_predictions(
     plt.savefig(out_fn, dpi=300)
     plt.close()
 
+# plots figure 4
 def plot_regression_predictions(
     data_option: int,
     model_type: str,
@@ -550,7 +539,7 @@ def plot_regression_predictions(
     The plot is saved as predictions_{model_type}_{model_name}_{data_option}.png within the appropriate subdirectory.
     """
     run_dir = _config_run_dir(
-        Path("outputs/regression"),
+        REGRESSION_OUTDIR,
         model_name,
         data_option,
         model_type,
@@ -602,7 +591,7 @@ def plot_regression_predictions(
     plt.legend(fontsize=9)
     plt.tight_layout()
 
-    save_dir = _plots_save_dir(Path("outputs/regression"), validation)
+    save_dir = _plots_save_dir(REGRESSION_OUTDIR, validation)
     zim_prefix = "validation_" if validation else ""
     if data_option == 1:
         out_fn = save_dir / f"{zim_prefix}predictions_{model_type}_{model_name}_{data_option}_{data_type}.png"
@@ -611,6 +600,7 @@ def plot_regression_predictions(
     plt.savefig(out_fn, dpi=300)
     plt.close()
 
+# plots figures 1 and 6
 def plot_mean_regression_metrics(
     data_option: int,
     model_type: str,
@@ -618,254 +608,169 @@ def plot_mean_regression_metrics(
     data_type: str,
     validation: bool = False,
 ) -> None:
-    
     """
     Scan all runs under outputs/regression/, compute average MAE and RMSE per
-    (model, data_option, feature_set, sample_source), and create two bar plots:
-      - Data option 1
-      - Data options 2 and 3
+    (model, data_option=1, feature_set, sample_source) and create a bar plot
+    with 2 bars per group (MAE, RMSE).
 
-    When validation=True, reads metrics from .../validation_zimbabwe/.
+    When validation=True, reads from each model's validation_zimbabwe/
+    subdirectory and saves to outputs/plots/validation_zimbabwe/.
     """
-    # Define mapping for color/opacity for each metric
-    METRIC_STYLE = {
-        "mean_mae": {"color": "#1f77b4", "alpha": 0.5, "label": "MAE"},
-        "mean_rmse": {"color": "#ff7f0e", "alpha": 0.9, "label": "RMSE"},
-    }
     FEATURE_SETS = ["clinical", "biomarker", "combined"]
+    MAE_COLOR  = "#1f77b4"
+    RMSE_COLOR = "#ff7f0e"
 
-    # Subdir names are either:
-    #   - data_option 1:  {model_name}__opt1__{feature_set}__{sample_source}  (sample_source in {heel, cord})
-    #   - data_option 2/3:{model_name}__opt{2,3}__{feature_set}              (no sample_source suffix)
-    all_subdirs = list(Path("outputs/regression").glob("*"))
-    entries = []
-    for subdir in all_subdirs:
-        try:
-            if validation:
-                if not subdir.is_dir():
-                    continue
-                config_name = _result_subdir_name(subdir / VALIDATION_SUBDIR, validation=True)
-                if config_name is None:
-                    continue
-                parts = config_name.split("__")
-            else:
+    def _load_entries() -> pd.DataFrame:
+        all_subdirs = list(REGRESSION_OUTDIR.glob("*"))
+        entries = []
+        for subdir in all_subdirs:
+            try:
                 parts = subdir.name.split("__")
-            # Handle both 3-part and 4-part names
-            if len(parts) == 4:
-                model_name, opt_str, model_type, sample_source = parts
-            elif len(parts) == 3:
-                model_name, opt_str, model_type = parts
-                sample_source = None
-            else:
-                continue
-            if not opt_str.startswith("opt"):
-                continue
-            data_option = int(opt_str.replace("opt", ""))
-
-            # For data_option 1 we require an explicit sample_source ('heel' or 'cord')
-            if data_option == 1:
+                if len(parts) == 4:
+                    mn, opt_str, mt, sample_source = parts
+                elif len(parts) == 3:
+                    mn, opt_str, mt = parts
+                    sample_source = None
+                else:
+                    continue
+                if not opt_str.startswith("opt"):
+                    continue
+                do = int(opt_str.replace("opt", ""))
+                if do != 1:
+                    continue
                 if sample_source not in {"heel", "cord"}:
                     continue
-            else:
-                # For data_option 2/3, we don't distinguish heel/cord here
-                # but keep the column for completeness
-                if sample_source is None:
-                    sample_source = "all"
 
-            if validation:
-                mean_metrics_path = subdir / VALIDATION_SUBDIR / "mean_metrics_all.csv"
-                per_run_path = subdir / VALIDATION_SUBDIR / "metrics_all.csv"
-            else:
-                mean_metrics_path = subdir / "mean_metrics_all.csv"
-                per_run_path = subdir / "metrics_all.csv"
+                result_dir = subdir / VALIDATION_SUBDIR if validation else subdir
+                mean_p = result_dir / "mean_metrics_all.csv"
+                run_p  = result_dir / "metrics_all.csv"
 
-            if mean_metrics_path.exists():
-                mean_metrics_df = pd.read_csv(mean_metrics_path)
-                mean_mae = mean_metrics_df["mae_mean"].iloc[0]
-                std_mae = mean_metrics_df["mae_std"].iloc[0]
-                ci_lower_mae = mean_metrics_df["mae_ci_lower"].iloc[0]
-                ci_upper_mae = mean_metrics_df["mae_ci_upper"].iloc[0]
-                if (
-                    "rmse_mean" in mean_metrics_df.columns
-                    and "rmse_std" in mean_metrics_df.columns
-                    and "rmse_ci_lower" in mean_metrics_df.columns
-                    and "rmse_ci_upper" in mean_metrics_df.columns
-                ):
-                    mean_rmse = mean_metrics_df["rmse_mean"].iloc[0]
-                    std_rmse = mean_metrics_df["rmse_std"].iloc[0]
-                    ci_lower_rmse = mean_metrics_df["rmse_ci_lower"].iloc[0]
-                    ci_upper_rmse = mean_metrics_df["rmse_ci_upper"].iloc[0]
-                else:
-                    if not per_run_path.exists():
-                        continue
-                    mrun = pd.read_csv(per_run_path)
-                    if "rmse" in mrun.columns:
-                        rs = mrun["rmse"].astype(float)
-                    elif "mse" in mrun.columns:
-                        rs = np.sqrt(mrun["mse"].astype(float))
+                if mean_p.exists():
+                    m = pd.read_csv(mean_p)
+                    mean_mae    = m["mae_mean"].iloc[0]
+                    ci_lower_mae = m["mae_ci_lower"].iloc[0]
+                    ci_upper_mae = m["mae_ci_upper"].iloc[0]
+                    if "rmse_mean" in m.columns:
+                        mean_rmse    = m["rmse_mean"].iloc[0]
+                        ci_lower_rmse = m["rmse_ci_lower"].iloc[0]
+                        ci_upper_rmse = m["rmse_ci_upper"].iloc[0]
                     else:
+                        if not run_p.exists():
+                            continue
+                        r = pd.read_csv(run_p)
+                        rs = r["rmse"].astype(float) if "rmse" in r.columns else np.sqrt(r["mse"].astype(float))
+                        n = max(1, len(rs))
+                        mean_rmse = float(rs.mean())
+                        sd = float(rs.std(ddof=0)) if n > 1 else 0.0
+                        ci_lower_rmse = mean_rmse - 1.96 * sd / np.sqrt(n)
+                        ci_upper_rmse = mean_rmse + 1.96 * sd / np.sqrt(n)
+                elif run_p.exists():
+                    r = pd.read_csv(run_p)
+                    if "mae" not in r.columns:
                         continue
-                    n = max(1, len(rs))
+                    mae_v = r["mae"].astype(float)
+                    n = max(1, len(mae_v))
+                    mean_mae = float(mae_v.mean())
+                    sd_m = float(mae_v.std(ddof=0)) if n > 1 else 0.0
+                    ci_lower_mae = mean_mae - 1.96 * sd_m / np.sqrt(n)
+                    ci_upper_mae = mean_mae + 1.96 * sd_m / np.sqrt(n)
+                    rs = r["rmse"].astype(float) if "rmse" in r.columns else np.sqrt(r["mse"].astype(float))
                     mean_rmse = float(rs.mean())
-                    std_rmse = float(rs.std(ddof=0)) if n > 1 else 0.0
-                    ci_lower_rmse = mean_rmse - 1.96 * std_rmse / np.sqrt(n)
-                    ci_upper_rmse = mean_rmse + 1.96 * std_rmse / np.sqrt(n)
-            else:
-                if not per_run_path.exists():
-                    continue
-                mrun = pd.read_csv(per_run_path)
-                if "mae" not in mrun.columns:
-                    continue
-                mae_vals = mrun["mae"].astype(float)
-                n = max(1, len(mae_vals))
-                mean_mae = float(mae_vals.mean())
-                std_mae = float(mae_vals.std(ddof=0)) if n > 1 else 0.0
-                ci_lower_mae = mean_mae - 1.96 * std_mae / np.sqrt(n)
-                ci_upper_mae = mean_mae + 1.96 * std_mae / np.sqrt(n)
-                if "rmse" in mrun.columns:
-                    rs = mrun["rmse"].astype(float)
-                elif "mse" in mrun.columns:
-                    rs = np.sqrt(mrun["mse"].astype(float))
+                    sd_r = float(rs.std(ddof=0)) if n > 1 else 0.0
+                    ci_lower_rmse = mean_rmse - 1.96 * sd_r / np.sqrt(n)
+                    ci_upper_rmse = mean_rmse + 1.96 * sd_r / np.sqrt(n)
                 else:
                     continue
-                mean_rmse = float(rs.mean())
-                std_rmse = float(rs.std(ddof=0)) if n > 1 else 0.0
-                ci_lower_rmse = mean_rmse - 1.96 * std_rmse / np.sqrt(n)
-                ci_upper_rmse = mean_rmse + 1.96 * std_rmse / np.sqrt(n)
-            entries.append(
-                {
-                    "model": model_name,
-                    "data_option": data_option,
-                    "feature_set": model_type,
-                    "sample_source": sample_source,
-                    "mean_mae": mean_mae,
-                    "mean_rmse": mean_rmse,
-                    "std_mae": std_mae,
-                    "std_rmse": std_rmse,
-                    "ci_lower_mae": ci_lower_mae,
-                    "ci_upper_mae": ci_upper_mae,
-                    "ci_lower_rmse": ci_lower_rmse,
-                    "ci_upper_rmse": ci_upper_rmse,
-                }
-            )
-        except Exception:
-            continue
 
-    if not entries:
-        label = "validation " if validation else ""
-        print(f"[WARN] No {label}regression metrics found under {Path('outputs/regression')}")
+                entries.append({
+                    "model": mn, "data_option": do, "feature_set": mt,
+                    "sample_source": sample_source,
+                    "mean_mae": mean_mae, "mean_rmse": mean_rmse,
+                    "ci_lower_mae": ci_lower_mae, "ci_upper_mae": ci_upper_mae,
+                    "ci_lower_rmse": ci_lower_rmse, "ci_upper_rmse": ci_upper_rmse,
+                })
+            except Exception:
+                continue
+        return pd.DataFrame(entries)
+
+    train_df = _load_entries()
+
+    if train_df.empty:
+        print(f"[WARN] No regression metrics found under {REGRESSION_OUTDIR}")
         return
 
-    df = pd.DataFrame(entries)
-    save_dir = _plots_save_dir(Path("outputs/regression"), validation)
-    zim_prefix = "validation_" if validation else ""
-    zim_title = " (External validation cohort)" if validation else ""
+    save_dir = _plots_save_dir(REGRESSION_OUTDIR, validation=validation)
 
-    plot_specs = [
-        (
-            [1],
-            {"heel": "both_heel", "cord": "both_cord"},
-            "Mean MAE and RMSE for all runs of all configurations with Data Option 1",
-            "mean_metrics_data_option1",
-        ),
-        (
-            [2, 3],
-            {2: "heel_all", 3: "cord_all"},
-            "Mean MAE and RMSE for all runs of all configurations with Data Option 2 and 3",
-            "mean_metrics_data_option2_3",
-        ),
-    ]
+    # Data option 1: heel and cord subgroups
+    groups = [("heel", "Heel prick"), ("cord", "Cord blood")]
 
-    # One plot per model, for training and validation.
-    for plot_model in ["elasticnet_cv"]:
-        model_df = df[df["model"] == plot_model]
-        if model_df.empty:
-            continue
+    cohort_tag = "zimbabwe_validation" if validation else "bangladesh_training"
+    fname = f"mean_metrics_data_option1_elasticnet_cv_{cohort_tag}.png"
+    fig, ax = plt.subplots(figsize=(12, 6))
+    bar_width = 0.30
+    x_positions = []
+    x_labels = []
+    x_idx = 0
+    legend_added = False
 
-        model_label = plot_model.replace("_cv", "")
-        for _do_group, do_titles, plot_title_base, fname_stem in plot_specs:
-            fname = f"{zim_prefix}{fname_stem}_{plot_model}.png"
-            plot_title = f"{plot_title_base} ({model_label}){zim_title}"
-
-            fig, ax = plt.subplots(figsize=(12, 6))
-            bar_width = 0.36
-            x_positions = []
-            x_labels = []
-            x_idx = 0
-            for group_val, group_title in do_titles.items():
-                if isinstance(group_val, int):
-                    cluster_df = model_df[model_df["data_option"] == group_val]
-                else:
-                    cluster_df = model_df[
-                        (model_df["data_option"] == 1) & (model_df["sample_source"] == group_val)
-                    ]
-                for feature_set in FEATURE_SETS:
-                    row = cluster_df[cluster_df["feature_set"] == feature_set]
-                    if row.empty:
-                        continue
-                    row = row.iloc[0]
-                    mean_mae = row["mean_mae"]
-                    mean_rmse = row["mean_rmse"]
-                    ci_lower_mae = row["ci_lower_mae"]
-                    ci_upper_mae = row["ci_upper_mae"]
-                    ci_lower_rmse = row["ci_lower_rmse"]
-                    ci_upper_rmse = row["ci_upper_rmse"]
-                    mae_low = max(0.0, float(mean_mae - ci_lower_mae))
-                    mae_high = max(0.0, float(ci_upper_mae - mean_mae))
-                    rmse_low = max(0.0, float(mean_rmse - ci_lower_rmse))
-                    rmse_high = max(0.0, float(ci_upper_rmse - mean_rmse))
-                    x_center = x_idx
-                    mae_x = x_center - bar_width / 2
-                    rmse_x = x_center + bar_width / 2
-
-                    mae_bar = ax.bar(
-                        mae_x,
-                        mean_mae,
-                        width=bar_width,
-                        color=METRIC_STYLE["mean_mae"]["color"],
-                        alpha=METRIC_STYLE["mean_mae"]["alpha"],
-                        edgecolor="black",
-                        linewidth=0.8,
-                        yerr=[[mae_low], [mae_high]],
-                        capsize=4,
-                        label=METRIC_STYLE["mean_mae"]["label"] if x_idx == 0 else "",
-                    )
-                    rmse_bar = ax.bar(
-                        rmse_x,
-                        mean_rmse,
-                        width=bar_width,
-                        color=METRIC_STYLE["mean_rmse"]["color"],
-                        alpha=METRIC_STYLE["mean_rmse"]["alpha"],
-                        edgecolor="black",
-                        linewidth=0.8,
-                        yerr=[[rmse_low], [rmse_high]],
-                        capsize=4,
-                        label=METRIC_STYLE["mean_rmse"]["label"] if x_idx == 0 else "",
-                    )
-
-                    ax.bar_label(mae_bar, labels=[f"{mean_mae:.2f}"], padding=2, fontsize=13, fontweight="bold")
-                    ax.bar_label(rmse_bar, labels=[f"{mean_rmse:.2f}"], padding=2, fontsize=13, fontweight="bold")
-
-                    x_positions.append(x_center)
-                    x_labels.append(f"{group_title}\n{feature_set}")
-                    x_idx += 1
-
-            if not x_positions:
-                print(f"[INFO] No mean metrics data to plot for {fname}")
-                plt.close(fig)
+    for sample_source, source_label in groups:
+        for feature_set in FEATURE_SETS:
+            pos = x_idx
+            row = train_df[
+                (train_df["data_option"] == 1) &
+                (train_df["sample_source"] == sample_source) &
+                (train_df["feature_set"] == feature_set)
+            ]
+            if row.empty:
+                x_positions.append(pos)
+                x_labels.append(f"{source_label}\n{feature_set}")
+                x_idx += 1
                 continue
+            row = row.iloc[0]
 
-            ax.set_xticks(x_positions)
-            ax.set_xticklabels(x_labels, rotation=20, ha="right", fontsize=13)
-            ax.set_ylabel("Average MAE and RMSE", fontsize=14, fontweight="bold")
-            ax.set_title(plot_title, fontsize=14, fontweight="bold")
-            ax.tick_params(axis="y", labelsize=13)
-            ax.grid(axis="y", alpha=0.3)
-            ax.legend()
-            fig.tight_layout()
-            fig.savefig(save_dir / fname, dpi=300)
-            plt.close(fig)
+            mae_lo = max(0.0, float(row["mean_mae"]  - row["ci_lower_mae"]))
+            mae_hi = max(0.0, float(row["ci_upper_mae"]  - row["mean_mae"]))
+            rmse_lo = max(0.0, float(row["mean_rmse"] - row["ci_lower_rmse"]))
+            rmse_hi = max(0.0, float(row["ci_upper_rmse"] - row["mean_rmse"]))
 
+            mae_bar = ax.bar(
+                pos - bar_width / 2, row["mean_mae"], width=bar_width,
+                color=MAE_COLOR, alpha=0.75, edgecolor="black", linewidth=0.7,
+                yerr=[[mae_lo], [mae_hi]], capsize=4,
+                label="MAE" if not legend_added else "",
+            )
+            rmse_bar = ax.bar(
+                pos + bar_width / 2, row["mean_rmse"], width=bar_width,
+                color=RMSE_COLOR, alpha=0.75, edgecolor="black", linewidth=0.7,
+                yerr=[[rmse_lo], [rmse_hi]], capsize=4,
+                label="RMSE" if not legend_added else "",
+            )
+            legend_added = True
+
+            ax.bar_label(mae_bar,  labels=[f"{row['mean_mae']:.2f}"],  padding=2, fontsize=12, fontweight="bold")
+            ax.bar_label(rmse_bar, labels=[f"{row['mean_rmse']:.2f}"], padding=2, fontsize=12, fontweight="bold")
+
+            x_positions.append(pos)
+            x_labels.append(f"{source_label}\n{feature_set}")
+            x_idx += 1
+
+    if not x_positions:
+        plt.close(fig)
+        return
+
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(x_labels, rotation=20, ha="right", fontsize=13)
+    ax.tick_params(axis="y", labelsize=13)
+    ax.set_ylabel("Average MAE / RMSE (weeks)", fontsize=14, fontweight="bold")
+    cohort_label = "Zimbabwe validation cohort" if validation else "Bangladesh training cohort"
+    ax.set_title(f"Mean MAE and RMSE — Data Option 1 ({cohort_label})", fontsize=14, fontweight="bold")
+    ax.legend(fontsize=12, framealpha=0.9)
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(save_dir / fname, dpi=300)
+    plt.close(fig)
+
+#plots figure 5 and 7
 def plot_univariate_analysis(
     data_option: int,
     model_type: str,
@@ -915,22 +820,8 @@ def plot_univariate_analysis(
 
     target_col = "gestational_age_weeks"
     
-    biomarker_features_to_keep = [
-        "TSH", "N17P",
-        "IRT", "GALT", "BIOT", "Ala", "Arg", "ASA", "ASA_Arg", "ASA_Orn", "Cit", "Cit_Arg", "Cit_Orn",
-        "Cit_Tyr", "Gly", "LEU", "Leu_Ala", "Leu_Phe", "MET", "Met_Phe", "Orn", "Orn_Arg", "Orn_Cit",
-        "Orn_Phe", "PHE", "PHE_TYR", "SUAC", "TYR", "Tyr_Phe", "Val", "Val_Ala", "Val_Phe", "C0",
-        "C0_C16C18", "C0C2C3C16C18_Cit", "C2", "C3", "C3_C0", "C3_C16", "C3_C2", "C3_C4DC",
-        "C3DC", "C4", "C4DC", "C4OH", "C5", "C5_C0", "C5_C2", "C5_C3", "C5_1", "C5DC", "C5DC_C16",
-        "C5DC_C5OH", "C5DC_C8", "C5OH", "C5OH_C2", "C5OH_C5_1", "C5OH_C8", "C6", "C6DC", "C8", "C8_C10",
-        "C8_C2", "C8_1", "C10", "C10_1", "C12", "C12_1", "C14", "C14OH", "C14_1", "C14_1_C12_1",
-        "C14_1_C16", "C14_1_C4", "C14_2", "C16", "C16_1OH", "C16_1OH_C4DC", "C16OH", "C16OH_C16",
-        "C18", "C18_1", "C18_1OH", "C18_2", "C18OH",
-        "HGB___FAST", "HGB___F1", "HGB___F", "HGB___F_F1", "HGB___A", "HGB___FAST_F1", "HGB___Other",
-    ]
-
-    features_to_keep = biomarker_features_to_keep
-    keep_cols = [c for c in features_to_keep + [target_col] if c in df.columns]
+    df = add_hgb_ratio(df)
+    keep_cols = [c for c in BIOMARKER_FEATURES + [target_col] if c in df.columns]
     df = df[keep_cols].copy()
 
     if target_col not in df.columns:
@@ -942,9 +833,9 @@ def plot_univariate_analysis(
     y_cont = df[target_col]
     y = (y_cont < PRETERM_CUTOFF).astype(int)
 
-    
+
     if model_type == "biomarker":
-        biomarker_cols = [c for c in biomarker_features_to_keep if c in df.columns]
+        biomarker_cols = [c for c in BIOMARKER_FEATURES if c in df.columns]
         X = df[biomarker_cols].copy()
 
     min_per_group = 3
@@ -1114,6 +1005,8 @@ def plot_univariate_analysis(
     )
     plt.close(fig)
 
+# analysis for figures 2 and 3
+
 def _coef_pairs_from_row(names_cell, vals_cell) -> list[tuple[str, float]]:
     """
     One row from coefficients_all.csv may store sparse (feature, coef) pairs as lists
@@ -1152,6 +1045,7 @@ def _coef_pairs_from_row(names_cell, vals_cell) -> list[tuple[str, float]]:
     return [(str(n).strip(), c) for n, c in zip(names, coefs) if abs(c) > 0]
 
 
+#plot figures 2 and 3
 def plot_feature_selected_coe(
     data_option: int,
     model_type: str,
@@ -1241,25 +1135,25 @@ def plot_feature_selected_coe(
     plt.close(fig)
 
 
+
+
 def run_all_plots(validation: bool = False) -> None:
     """Generate all plots for training or external validation results."""
     if not validation:
-        boxplot_irt_dataset_preterm_term()
+        pass  
 
-    for data_option in [1, 2, 3]:
+    # Only data_option=1 runs exist (heel-prick and cord-blood samples both present)
+    for data_option in [1]:
         for model_type in ["clinical", "biomarker", "combined"]:
             for model_name in ["elasticnet_cv"]:
-                if data_option == 1:
-                    data_types = ["heel", "cord"]
-                else:
-                    data_types = ["all"]
+                data_types = ["heel", "cord"]
                 for data_type in data_types:
                     plot_features_selected(
                         data_option,
                         model_type,
                         model_name,
                         data_type,
-                        Path("outputs/classification"),
+                        CLASSIFICATION_OUTDIR,
                         validation=validation,
                     )
                     plot_features_selected(
@@ -1267,7 +1161,7 @@ def run_all_plots(validation: bool = False) -> None:
                         model_type,
                         model_name,
                         data_type,
-                        Path("outputs/regression"),
+                        REGRESSION_OUTDIR,
                         validation=validation,
                     )
                     plot_hyperparameters(
@@ -1275,7 +1169,7 @@ def run_all_plots(validation: bool = False) -> None:
                         model_type,
                         model_name,
                         data_type,
-                        Path("outputs/classification"),
+                        CLASSIFICATION_OUTDIR,
                         validation=validation,
                     )
                     plot_hyperparameters(
@@ -1283,7 +1177,7 @@ def run_all_plots(validation: bool = False) -> None:
                         model_type,
                         model_name,
                         data_type,
-                        Path("outputs/regression"),
+                        REGRESSION_OUTDIR,
                         validation=validation,
                     )
                     plot_regression_predictions(
@@ -1312,7 +1206,7 @@ def run_all_plots(validation: bool = False) -> None:
                         model_type,
                         model_name,
                         data_type,
-                        Path("outputs/classification"),
+                        CLASSIFICATION_OUTDIR,
                         validation=validation,
                     )
                     plot_feature_selected_coe(
@@ -1320,12 +1214,12 @@ def run_all_plots(validation: bool = False) -> None:
                         model_type,
                         model_name,
                         data_type,
-                        Path("outputs/regression"),
+                        REGRESSION_OUTDIR,
                         validation=validation,
                     )
 
-        plot_average_auc(Path("outputs/classification"), validation=validation)
-
+    # AUC and regression metric summary plots scan all subdirs internally
+    plot_average_auc(CLASSIFICATION_OUTDIR, validation=validation)
     plot_mean_regression_metrics(1, "clinical", "elasticnet_cv", "heel", validation=validation)
 
 

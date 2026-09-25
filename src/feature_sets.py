@@ -39,8 +39,25 @@ BIOMARKER_FEATURES = [
     "C12", "C12_1", "C14", "C14OH", "C14_1", "C14_1_C12_1", "C14_1_C16", "C14_1_C4", "C14_2",
     "C16", "C16_1OH", "C16_1OH_C4DC", "C16OH", "C16OH_C16", "C18", "C18_1", "C18_1OH", "C18_2",
     "C18OH", "HGB___FAST", "HGB___F1", "HGB___F", "HGB___F_F1", "HGB___A", "HGB___FAST_F1",
-    "HGB___Other",
+    "HGB___Other", "HGB_adult_ratio",
 ]
+
+
+HGB_RATIO_FEATURE = "HGB_adult_ratio"
+
+
+def add_hgb_ratio(df: pd.DataFrame) -> pd.DataFrame:
+    """Add derived fetal-to-adult haemoglobin ratio (HGB_A / (HGB_A + HGB_F + HGB_F1)).
+
+    Suggested by Steven Hawken: this proportion captures the fetal-to-adult haemoglobin
+    transition and was found to be more predictive than the individual peak percentages alone
+    in previous studies. Equivalent to HGB___A / (HGB___A + HGB___F_F1) since HGB___F_F1
+    is the pre-computed sum of HGB___F and HGB___F1.
+    """
+    df = df.copy()
+    denom = df["HGB___A"] + df["HGB___F_F1"]
+    df[HGB_RATIO_FEATURE] = df["HGB___A"] / denom
+    return df
 
 
 def validation_sample_type(study_id: str) -> Optional[str]:
@@ -108,6 +125,7 @@ def load_training_frame(
     if TARGET_COL not in df.columns:
         raise KeyError(f"Expected target column '{TARGET_COL}' not found.")
 
+    df = add_hgb_ratio(df)
     df = df.dropna(subset=[TARGET_COL])
     feature_names = feature_columns_for_model_type(model_type, df.columns)
     X = df[feature_names].copy()
@@ -136,6 +154,7 @@ def load_validation_frame(
     if TARGET_COL not in df.columns:
         raise KeyError(f"Expected target column '{TARGET_COL}' not found in validation CSV.")
 
+    df = add_hgb_ratio(df)
     df = df.dropna(subset=[TARGET_COL])
     feature_names = feature_columns_for_model_type(model_type, df.columns)
     X_val = df[feature_names].copy()
